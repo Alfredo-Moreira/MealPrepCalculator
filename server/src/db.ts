@@ -17,6 +17,12 @@ export function getDb(): Database.Database {
 export function initDb() {
   const db = getDb();
 
+  // Idempotent migration: add substitutes_json if missing
+  const cols = db.prepare('PRAGMA table_info(meal_items)').all() as { name: string }[];
+  if (!cols.some(c => c.name === 'substitutes_json')) {
+    db.exec("ALTER TABLE meal_items ADD COLUMN substitutes_json TEXT DEFAULT '[]'");
+  }
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS profiles (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

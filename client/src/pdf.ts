@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf';
 import type { Profile, MealPlan } from './types';
-import { ACTIVITY_FACTORS, recommendedProtein } from './types';
+import { ACTIVITY_FACTORS, recommendedProtein, computeSubstitute } from './types';
 
 const MARGIN = 14;
 const PAGE_W = 210;
@@ -17,7 +17,7 @@ function getPct(grams: number, kcalPerGram: number, totalCal: number): number {
   return Math.round((grams * kcalPerGram / totalCal) * 100);
 }
 
-export function exportPDF(profile: Profile, plans: MealPlan[]) {
+function buildDoc(profile: Profile, plans: MealPlan[]): jsPDF {
   const doc = new jsPDF();
   let y = 0;
 
@@ -253,12 +253,19 @@ export function exportPDF(profile: Profile, plans: MealPlan[]) {
       y += 5;
 
       // Items
-      doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
-      for (const item of items) {
-        if (y > 275) {
+      items.forEach((item, rowIdx) => {
+        const subCount = item.substitutes?.length ?? 0;
+        const rowHeight = 5 + subCount * 4.5;
+        if (y > 275 - rowHeight) {
           doc.addPage();
           y = 25;
+        }
+
+        // Alternating row background
+        if (rowIdx % 2 === 1) {
+          doc.setFillColor(245, 245, 245);
+          doc.rect(MARGIN, y - 3.5, CONTENT_W, 5.5, 'F');
         }
 
         const match = item.serving_size.match(/^([\d.]+)\s*(.*)$/);
@@ -266,20 +273,54 @@ export function exportPDF(profile: Profile, plans: MealPlan[]) {
           ? `${Math.round(parseFloat(match[1]) * (item.multiplier ?? 1) * 10) / 10}${match[2]}`
           : item.serving_size;
 
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(0);
         doc.text(item.food_name, MARGIN + 2, y);
         doc.text(item.serving_size, MARGIN + 57, y);
         doc.text(`${item.multiplier ?? 1}x`, MARGIN + 77, y, { align: 'right' });
         doc.text(totalServing, MARGIN + 81, y);
+        doc.setFont('helvetica', 'bold');
         doc.text(`${Math.round(item.calories)}`, MARGIN + 104, y, { align: 'right' });
+        doc.setFont('helvetica', 'normal');
         doc.text(`${Math.round(item.protein)}`, MARGIN + 121, y, { align: 'right' });
         doc.text(`${Math.round(item.carbs)}`, MARGIN + 138, y, { align: 'right' });
         doc.text(`${Math.round(item.fat)}`, MARGIN + 155, y, { align: 'right' });
         y += 5;
-      }
+
+        // Substitute rows
+        if (subCount > 0) {
+          doc.setFontSize(8);
+          doc.setTextColor(120);
+          for (const sub of item.substitutes!) {
+            const c = computeSubstitute(sub, item.calories);
+            doc.setFont('helvetica', 'italic');
+            doc.text(`↳ ${sub.food_name}`, MARGIN + 6, y);
+            doc.setFont('helvetica', 'normal');
+            doc.text(c.totalServing, MARGIN + 81, y);
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(80);
+            doc.text(`${c.calories}`, MARGIN + 104, y, { align: 'right' });
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(120);
+            y += 4.5;
+          }
+          doc.setTextColor(0);
+          doc.setFontSize(9);
+        }
+      });
       y += 4;
     }
 
   }
 
-  doc.save(`${profile.name.replace(/\s+/g, '_')}_meal_plan.pdf`);
+  return doc;
+}
+
+export function exportPDF(profile: Profile, plans: MealPlan[]) {
+  buildDoc(profile, plans).save(`${profile.name.replace(/\s+/g, '_')}_meal_plan.pdf`);
+}
+
+export function previewPDFUrl(profile: Profile, plans: MealPlan[]): string {
+  return buildDoc(profile, plans).output('bloburl') as unknown as string;
 }

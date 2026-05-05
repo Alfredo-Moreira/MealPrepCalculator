@@ -12,6 +12,30 @@ export interface Profile {
   plan_count?: number;
 }
 
+export interface MealSubstitute {
+  food_name: string;
+  serving_size: string;
+  base_calories: number;
+  base_protein: number;
+  base_carbs: number;
+  base_fat: number;
+}
+
+export function computeSubstitute(sub: MealSubstitute, parentCalories: number) {
+  const multiplier = sub.base_calories > 0
+    ? Math.round((parentCalories / sub.base_calories) * 10) / 10
+    : 1;
+  const m = sub.serving_size.match(/^([\d.]+)\s*(.*)$/);
+  const totalServing = m
+    ? `${Math.round(parseFloat(m[1]) * multiplier * 10) / 10}${m[2]}`
+    : sub.serving_size;
+  return {
+    multiplier,
+    totalServing,
+    calories: Math.round(sub.base_calories * multiplier),
+  };
+}
+
 export interface MealItem {
   id?: number;
   meal_plan_id?: number;
@@ -27,6 +51,7 @@ export interface MealItem {
   protein: number;
   carbs: number;
   fat: number;
+  substitutes?: MealSubstitute[];
 }
 
 export interface MealPlan {
@@ -89,4 +114,26 @@ export function recommendedProtein(weight_kg: number, goal: Profile['goal']): { 
     return { min: Math.round(weight_kg * 1.2), max: Math.round(weight_kg * 1.5) };
   }
   return { min: Math.round(weight_kg * 0.8), max: Math.round(weight_kg * 1.0) };
+}
+
+export type MacroCategory = 'protein' | 'carb' | 'fat' | 'mixed';
+
+export function getMacroCategory(base_calories: number, base_protein: number, base_carbs: number, base_fat: number): MacroCategory {
+  if (base_calories <= 0) return 'mixed';
+  const pPct = (base_protein * 4) / base_calories;
+  const cPct = (base_carbs * 4) / base_calories;
+  const fPct = (base_fat * 9) / base_calories;
+  if (pPct > 0.4) return 'protein';
+  if (cPct > 0.4) return 'carb';
+  if (fPct > 0.4) return 'fat';
+  return 'mixed';
+}
+
+export type SubstituteMatch = 'good' | 'poor';
+
+export function getSubstituteMatch(parent: MealItem, sub: MealSubstitute): SubstituteMatch {
+  const parentCat = getMacroCategory(parent.base_calories, parent.base_protein, parent.base_carbs, parent.base_fat);
+  const subCat = getMacroCategory(sub.base_calories, sub.base_protein, sub.base_carbs, sub.base_fat);
+  if (parentCat === 'mixed' || subCat === 'mixed') return 'good';
+  return parentCat === subCat ? 'good' : 'poor';
 }

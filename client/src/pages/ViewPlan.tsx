@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { fetchPlan, syncFoods } from '../api';
 import type { Profile, MealPlan } from '../types';
-import { ACTIVITY_FACTORS } from '../types';
+import { ACTIVITY_FACTORS, computeSubstitute } from '../types';
 import BudgetBar from '../components/BudgetBar';
-import { exportPDF } from '../pdf';
+import { exportPDF, previewPDFUrl } from '../pdf';
 
 export default function ViewPlan() {
   const { id } = useParams<{ id: string }>();
@@ -14,6 +14,11 @@ export default function ViewPlan() {
   const [activeTab, setActiveTab] = useState<'non_workout' | 'workout'>('non_workout');
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [expandedSubs, setExpandedSubs] = useState<Set<number>>(new Set());
+
+  const toggleSubs = (idx: number) =>
+    setExpandedSubs((prev) => { const next = new Set(prev); next.has(idx) ? next.delete(idx) : next.add(idx); return next; });
 
   useEffect(() => {
     if (!id) return;
@@ -71,10 +76,43 @@ export default function ViewPlan() {
               Edit Plan
             </Link>
             <button
+              onClick={() => setPreviewUrl(previewPDFUrl(profile, plans))}
+              className="border border-blue-400 text-blue-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-50 transition-colors cursor-pointer"
+            >
+              Preview PDF
+            </button>
+            <button
               onClick={() => exportPDF(profile, plans)}
               className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors cursor-pointer"
             >
               Export as PDF
+            </button>
+            <button
+              onClick={() => {
+                const exportData = {
+                  profile: {
+                    name: profile.name, age: profile.age, gender: profile.gender,
+                    weight_kg: profile.weight_kg, height_cm: profile.height_cm,
+                    activity_level: profile.activity_level, goal: profile.goal, tdee: profile.tdee,
+                  },
+                  plans: plans.map(({ name, plan_type, calorie_target, protein_target, carbs_target, fat_target, items }) => ({
+                    name, plan_type, calorie_target, protein_target, carbs_target, fat_target,
+                    items: items.map(({ meal_label, food_name, serving_size, multiplier, base_calories, base_protein, base_carbs, base_fat, calories, protein, carbs, fat }) => ({
+                      meal_label, food_name, serving_size, multiplier, base_calories, base_protein, base_carbs, base_fat, calories, protein, carbs, fat,
+                    })),
+                  })),
+                };
+                const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${profile.name.replace(/\s+/g, '_')}_meal_plan.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="border border-gray-300 px-4 py-2 rounded-lg text-sm text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
+            >
+              Export as JSON
             </button>
             <button
               onClick={handleSyncToDb}
@@ -181,7 +219,7 @@ export default function ViewPlan() {
                       <th className="pb-1 font-medium text-right">Serving</th>
                       <th className="pb-1 font-medium text-right">Qty</th>
                       <th className="pb-1 font-medium text-right">Total</th>
-                      <th className="pb-1 font-medium text-right">Cal</th>
+                      <th className="pb-1 font-bold text-right">Cal</th>
                       <th className="pb-1 font-medium text-right">P</th>
                       <th className="pb-1 font-medium text-right">C</th>
                       <th className="pb-1 font-medium text-right">F</th>
@@ -193,17 +231,44 @@ export default function ViewPlan() {
                       const totalServing = match
                         ? `${Math.round(parseFloat(match[1]) * item.multiplier * 10) / 10}${match[2]}`
                         : item.serving_size;
+                      const even = idx % 2 === 0;
+                      const hasSubs = (item.substitutes?.length ?? 0) > 0;
+                      const subsOpen = expandedSubs.has(idx);
                       return (
-                      <tr key={idx} className="border-b border-gray-50">
-                        <td className="py-1 text-gray-800">{item.food_name}</td>
-                        <td className="py-1 text-right text-gray-600">{item.serving_size}</td>
-                        <td className="py-1 text-right text-gray-500">{item.multiplier}x</td>
-                        <td className="py-1 text-right text-gray-600">{totalServing}</td>
-                        <td className="py-1 text-right text-gray-800">{item.calories}</td>
-                        <td className="py-1 text-right text-gray-600">{item.protein}g</td>
-                        <td className="py-1 text-right text-gray-600">{item.carbs}g</td>
-                        <td className="py-1 text-right text-gray-600">{item.fat}g</td>
-                      </tr>
+                        <>
+                          <tr key={idx} className={even ? 'bg-white' : 'bg-gray-50'}>
+                            <td className="py-1.5 px-1 text-gray-800">
+                              <div className="flex items-center gap-1">
+                                {hasSubs && (
+                                  <button onClick={() => toggleSubs(idx)} className="text-gray-400 hover:text-gray-600 cursor-pointer shrink-0" title="Show substitutes">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className={`h-3.5 w-3.5 transition-transform ${subsOpen ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+                                      <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
+                                    </svg>
+                                  </button>
+                                )}
+                                {item.food_name}
+                              </div>
+                            </td>
+                            <td className="py-1.5 px-1 text-right text-gray-600">{item.serving_size}</td>
+                            <td className="py-1.5 px-1 text-right text-gray-500">{item.multiplier}x</td>
+                            <td className="py-1.5 px-1 text-right text-gray-600">{totalServing}</td>
+                            <td className="py-1.5 px-1 text-right font-bold text-gray-900">{item.calories}</td>
+                            <td className="py-1.5 px-1 text-right text-gray-600">{item.protein}g</td>
+                            <td className="py-1.5 px-1 text-right text-gray-600">{item.carbs}g</td>
+                            <td className="py-1.5 px-1 text-right text-gray-600">{item.fat}g</td>
+                          </tr>
+                          {hasSubs && subsOpen && item.substitutes!.map((sub, si) => {
+                            const c = computeSubstitute(sub, item.calories);
+                            return (
+                              <tr key={`sub-${idx}-${si}`} className="bg-blue-50/50">
+                                <td className="py-1 pl-5 pr-1 text-gray-500 text-xs italic" colSpan={3}>↳ {sub.food_name}</td>
+                                <td className="py-1 px-1 text-right text-gray-400 text-xs">{c.totalServing}</td>
+                                <td className="py-1 px-1 text-right font-bold text-gray-700 text-xs">{c.calories}</td>
+                                <td colSpan={3} />
+                              </tr>
+                            );
+                          })}
+                        </>
                       );
                     })}
                   </tbody>
@@ -216,6 +281,31 @@ export default function ViewPlan() {
             <p className="text-gray-500 text-center mt-8">No items in this plan.</p>
           )}
         </>
+      )}
+
+      {previewUrl && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-black/60" onClick={() => setPreviewUrl(null)}>
+          <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-gray-200" onClick={(e) => e.stopPropagation()}>
+            <span className="font-semibold text-gray-800">PDF Preview — {profile.name}</span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => exportPDF(profile, plans)}
+                className="bg-blue-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors cursor-pointer"
+              >
+                Download
+              </button>
+              <button
+                onClick={() => setPreviewUrl(null)}
+                className="px-4 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <iframe src={previewUrl} className="w-full h-full border-0" title="PDF Preview" />
+          </div>
+        </div>
       )}
     </div>
   );
