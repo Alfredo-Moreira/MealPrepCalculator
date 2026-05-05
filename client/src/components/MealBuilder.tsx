@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import type { MealPlan, MealItem } from '../types';
-import { DEFAULT_MEALS } from '../types';
+import type { MealPlan, MealItem, MealSubstitute } from '../types';
+import { DEFAULT_MEALS, getSubstituteMatch, computeSubstitute } from '../types';
 import BudgetBar from './BudgetBar';
 import { searchFoods } from '../api';
 import type { FoodEntry } from '../api';
@@ -158,6 +158,14 @@ function isItemComplete(item: MealItem): boolean {
   );
 }
 
+function emptySubstitute(): MealSubstitute {
+  return { food_name: '', serving_size: '', base_calories: 0, base_protein: 0, base_carbs: 0, base_fat: 0 };
+}
+
+function isSubComplete(sub: MealSubstitute): boolean {
+  return sub.food_name.trim() !== '' && sub.base_calories > 0;
+}
+
 export default function MealBuilder({ plan, onChange }: Props) {
   const [meals, setMeals] = useState<string[]>(() => {
     const labelsInItems = [...new Set(plan.items.map((i) => i.meal_label))];
@@ -225,6 +233,35 @@ export default function MealBuilder({ plan, onChange }: Props) {
     const clamped = Math.max(0.1, Math.round(multiplier * 10) / 10);
     const items = [...plan.items];
     items[globalIndex] = applyMultiplier(items[globalIndex], clamped);
+    onChange({ ...plan, items });
+  };
+
+  const addSubstitute = (globalIndex: number) => {
+    const items = [...plan.items];
+    items[globalIndex] = { ...items[globalIndex], substitutes: [...(items[globalIndex].substitutes ?? []), emptySubstitute()] };
+    onChange({ ...plan, items });
+  };
+
+  const removeSubstitute = (globalIndex: number, subIndex: number) => {
+    const items = [...plan.items];
+    const subs = [...(items[globalIndex].substitutes ?? [])];
+    subs.splice(subIndex, 1);
+    items[globalIndex] = { ...items[globalIndex], substitutes: subs };
+    onChange({ ...plan, items });
+  };
+
+  const selectSubstituteFromDb = (globalIndex: number, subIndex: number, entry: FoodEntry) => {
+    const items = [...plan.items];
+    const subs = [...(items[globalIndex].substitutes ?? [])];
+    subs[subIndex] = {
+      food_name: entry.food_name,
+      serving_size: entry.serving_size,
+      base_calories: entry.base_calories,
+      base_protein: entry.base_protein,
+      base_carbs: entry.base_carbs,
+      base_fat: entry.base_fat,
+    };
+    items[globalIndex] = { ...items[globalIndex], substitutes: subs };
     onChange({ ...plan, items });
   };
 
@@ -500,6 +537,57 @@ export default function MealBuilder({ plan, onChange }: Props) {
                           </div>
                         );
                       })()}
+
+                      {/* Substitutes */}
+                      {complete && (
+                        <div className="mt-3 border-t border-dashed border-gray-200 pt-3">
+                          {(item.substitutes ?? []).map((sub, subIndex) => {
+                            const subComplete = isSubComplete(sub);
+                            const match = subComplete ? getSubstituteMatch(item, sub) : null;
+                            const computed = subComplete ? computeSubstitute(sub, item.calories) : null;
+                            return (
+                              <div key={subIndex} className="mb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-gray-400 text-xs select-none shrink-0">↳</span>
+                                  <div className="flex-1 min-w-0">
+                                    <FoodNameInput
+                                      value={sub.food_name}
+                                      onChange={(v) => {
+                                        const items = [...plan.items];
+                                        const subs = [...(items[globalIndex].substitutes ?? [])];
+                                        subs[subIndex] = { ...subs[subIndex], food_name: v, base_calories: 0 };
+                                        items[globalIndex] = { ...items[globalIndex], substitutes: subs };
+                                        onChange({ ...plan, items });
+                                      }}
+                                      onSelect={(entry) => selectSubstituteFromDb(globalIndex, subIndex, entry)}
+                                    />
+                                  </div>
+                                  {computed && (
+                                    <div className="shrink-0 flex items-center gap-2 text-xs text-gray-500">
+                                      <span>{computed.totalServing}</span>
+                                      <span className="font-bold text-gray-800">{computed.calories} kcal</span>
+                                    </div>
+                                  )}
+                                  {match && (
+                                    <span className="shrink-0" title={match === 'good' ? 'Good macro match' : 'Poor macro match — different dominant macro'}>
+                                      {match === 'good' ? '🟢' : '🔴'}
+                                    </span>
+                                  )}
+                                  <button onClick={() => removeSubstitute(globalIndex, subIndex)} className="shrink-0 text-red-400 hover:text-red-600 cursor-pointer" title="Remove substitute">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+                                  </button>
+                                </div>
+                                {subComplete && match === 'poor' && (
+                                  <p className="text-[10px] text-red-500 ml-5 mt-0.5">⚠ Different dominant macro — poor substitute</p>
+                                )}
+                              </div>
+                            );
+                          })}
+                          <button onClick={() => addSubstitute(globalIndex)} className="text-xs text-gray-400 hover:text-emerald-600 transition-colors cursor-pointer mt-1">
+                            + Add Substitute
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}

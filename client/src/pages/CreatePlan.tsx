@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import type { Profile, MealPlan, MealItem } from '../types';
-import { calculateTDEE, macrosFromCalories, DEFAULT_MEALS } from '../types';
+import type { Profile, MealPlan } from '../types';
+import { calculateTDEE, macrosFromCalories } from '../types';
 import { createPlan, updatePlan, syncFoods } from '../api';
 import BiomarkerForm from '../components/BiomarkerForm';
 import MacroSetup from '../components/MacroSetup';

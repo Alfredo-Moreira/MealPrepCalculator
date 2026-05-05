@@ -23,7 +23,11 @@ planRoutes.get('/plans/:profileId', (req, res) => {
 
   const mealPlans = db.prepare('SELECT * FROM meal_plans WHERE profile_id = ?').all(req.params.profileId);
   const plans = (mealPlans as any[]).map((plan) => {
-    const items = db.prepare('SELECT * FROM meal_items WHERE meal_plan_id = ?').all(plan.id);
+    const rawItems = db.prepare('SELECT * FROM meal_items WHERE meal_plan_id = ?').all(plan.id) as any[];
+    const items = rawItems.map(({ substitutes_json, ...item }) => ({
+      ...item,
+      substitutes: JSON.parse(substitutes_json || '[]'),
+    }));
     return { ...plan, items };
   });
 
@@ -46,8 +50,8 @@ planRoutes.post('/plans', (req, res) => {
   `);
 
   const insertItem = db.prepare(`
-    INSERT INTO meal_items (meal_plan_id, meal_label, food_name, serving_size, multiplier, base_calories, base_protein, base_carbs, base_fat, calories, protein, carbs, fat)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO meal_items (meal_plan_id, meal_label, food_name, serving_size, multiplier, base_calories, base_protein, base_carbs, base_fat, calories, protein, carbs, fat, substitutes_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const transaction = db.transaction(() => {
@@ -68,7 +72,8 @@ planRoutes.post('/plans', (req, res) => {
         insertItem.run(
           planId, item.meal_label, item.food_name, item.serving_size,
           item.multiplier ?? 1, item.base_calories ?? item.calories, item.base_protein ?? item.protein, item.base_carbs ?? item.carbs, item.base_fat ?? item.fat,
-          item.calories, item.protein, item.carbs, item.fat
+          item.calories, item.protein, item.carbs, item.fat,
+          JSON.stringify(item.substitutes ?? [])
         );
       }
     }
@@ -106,8 +111,8 @@ planRoutes.put('/plans/:profileId', (req, res) => {
   `);
 
   const insertItem = db.prepare(`
-    INSERT INTO meal_items (meal_plan_id, meal_label, food_name, serving_size, multiplier, base_calories, base_protein, base_carbs, base_fat, calories, protein, carbs, fat)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO meal_items (meal_plan_id, meal_label, food_name, serving_size, multiplier, base_calories, base_protein, base_carbs, base_fat, calories, protein, carbs, fat, substitutes_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const transaction = db.transaction(() => {
@@ -131,7 +136,8 @@ planRoutes.put('/plans/:profileId', (req, res) => {
         insertItem.run(
           planId, item.meal_label, item.food_name, item.serving_size,
           item.multiplier ?? 1, item.base_calories ?? item.calories, item.base_protein ?? item.protein, item.base_carbs ?? item.carbs, item.base_fat ?? item.fat,
-          item.calories, item.protein, item.carbs, item.fat
+          item.calories, item.protein, item.carbs, item.fat,
+          JSON.stringify(item.substitutes ?? [])
         );
       }
     }
