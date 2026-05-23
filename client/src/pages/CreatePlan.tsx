@@ -34,7 +34,7 @@ function makeEmptyPlan(type: 'workout' | 'non_workout', calories: number): MealP
 export default function CreatePlan() {
   const navigate = useNavigate();
   const location = useLocation();
-  const editState = location.state as { editId?: number; profile?: Profile; plans?: MealPlan[] } | null;
+  const editState = location.state as { editId?: string; profile?: Profile; plans?: MealPlan[] } | null;
   const editId = editState?.editId ?? null;
 
   const [step, setStep] = useState(1);

@@ -22,7 +22,7 @@ export default function ViewPlan() {
 
   useEffect(() => {
     if (!id) return;
-    fetchPlan(Number(id))
+    fetchPlan(id)
       .then(({ profile, plans }) => {
         setProfile(profile);
         setPlans(plans);

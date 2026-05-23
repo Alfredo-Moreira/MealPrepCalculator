@@ -1,5 +1,5 @@
 export interface Profile {
-  id?: number;
+  id?: string;
   name: string;
   age: number;
   gender: 'male' | 'female';
@@ -37,8 +37,8 @@ export function computeSubstitute(sub: MealSubstitute, parentCalories: number) {
 }
 
 export interface MealItem {
-  id?: number;
-  meal_plan_id?: number;
+  id?: string;
+  meal_plan_id?: string;
   meal_label: string;
   food_name: string;
   serving_size: string;
@@ -55,8 +55,8 @@ export interface MealItem {
 }
 
 export interface MealPlan {
-  id?: number;
-  profile_id?: number;
+  id?: string;
+  profile_id?: string;
   name: string;
   plan_type: 'workout' | 'non_workout';
   calorie_target: number;
