@@ -66,6 +66,31 @@ export async function checkHealth(): Promise<boolean> {
   }
 }
 
+export async function createFood(item: Omit<FoodEntry, 'id' | 'created_at'>): Promise<FoodEntry> {
+  const res = await fetch(`${BASE}/foods`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(item),
+  });
+  if (!res.ok) throw new Error((await res.json()).error ?? 'Failed to create food');
+  return res.json();
+}
+
+export async function updateFood(id: string, item: Omit<FoodEntry, 'id' | 'created_at'>): Promise<FoodEntry> {
+  const res = await fetch(`${BASE}/foods/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(item),
+  });
+  if (!res.ok) throw new Error((await res.json()).error ?? 'Failed to update food');
+  return res.json();
+}
+
+export async function deleteFood(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/foods/${id}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to delete food');
+}
+
 export async function syncFoods(items: Array<{
   food_name: string;
   serving_size?: string;

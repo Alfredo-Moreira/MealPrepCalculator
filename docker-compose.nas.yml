@@ -1,7 +1,7 @@
 ## TO BE USED IN THE NAS ENVIRONMENT ONLY
 services:
   meal-prep-calculator:
-    image: 192.168.4.99:5000/meal-prep-calculator:latest
+    image: 192.168.4.99:5000/meal-prep-calculator:v1.2.2
     platform: linux/arm64
     container_name: meal-prep-calculator
     restart: unless-stopped

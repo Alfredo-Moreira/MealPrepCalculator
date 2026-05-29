@@ -55,6 +55,7 @@ planRoutes.post('/plans', async (req, res) => {
   try {
     const { profile: profileData, plans } = req.body;
 
+    if (profileData.calorie_deficit == null) profileData.calorie_deficit = 0;
     const profile = await Profile.create(profileData);
 
     await Promise.all(
@@ -145,6 +146,54 @@ planRoutes.get('/foods/search', async (req, res) => {
       .sort({ food_name: 1 })
       .limit(10);
     res.json(foods.map((f) => f.toJSON()));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Create a single food entry
+planRoutes.post('/foods', async (req, res) => {
+  try {
+    const { food_name, serving_size, base_calories, base_protein, base_carbs, base_fat } = req.body;
+    if (!food_name?.trim() || base_calories == null) {
+      return res.status(400).json({ error: 'food_name and base_calories are required' });
+    }
+    const food = await Food.create({
+      food_name: food_name.trim(),
+      serving_size: serving_size ?? '',
+      base_calories,
+      base_protein: base_protein ?? 0,
+      base_carbs: base_carbs ?? 0,
+      base_fat: base_fat ?? 0,
+    });
+    res.status(201).json(food.toJSON());
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Update a food entry
+planRoutes.put('/foods/:id', async (req, res) => {
+  try {
+    const { food_name, serving_size, base_calories, base_protein, base_carbs, base_fat } = req.body;
+    const food = await Food.findByIdAndUpdate(
+      req.params.id,
+      { $set: { food_name: food_name?.trim(), serving_size, base_calories, base_protein, base_carbs, base_fat } },
+      { new: true, runValidators: true }
+    );
+    if (!food) return res.status(404).json({ error: 'Food not found' });
+    res.json(food.toJSON());
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Delete a food entry
+planRoutes.delete('/foods/:id', async (req, res) => {
+  try {
+    const food = await Food.findByIdAndDelete(req.params.id);
+    if (!food) return res.status(404).json({ error: 'Food not found' });
+    res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

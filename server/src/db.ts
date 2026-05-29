@@ -50,6 +50,7 @@ const ProfileSchema = new Schema({
   activity_level: String,
   goal: { type: String, default: 'maintain' },
   tdee: Number,
+  calorie_deficit: { type: Number, default: 0 },
   created_at: { type: Date, default: Date.now },
 });
 ProfileSchema.set('toJSON', { transform: idTransform });

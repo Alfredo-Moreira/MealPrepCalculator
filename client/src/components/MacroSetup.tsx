@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { MealPlan, Profile } from '../types';
-import { recommendedProtein } from '../types';
+import { recommendedProtein, macrosFromDeficit } from '../types';
 
 interface Props {
   tdee: number;
@@ -9,6 +9,7 @@ interface Props {
   workoutPlan: MealPlan;
   onNonWorkoutChange: (p: MealPlan) => void;
   onWorkoutChange: (p: MealPlan) => void;
+  onDeficitChange: (deficit: number) => void;
   onBack: () => void;
   onNext: () => void;
 }
@@ -149,9 +150,34 @@ function MacroEditor({
   );
 }
 
-export default function MacroSetup({ tdee, profile, nonWorkoutPlan, workoutPlan, onNonWorkoutChange, onWorkoutChange, onBack, onNext }: Props) {
+export default function MacroSetup({ tdee, profile, nonWorkoutPlan, workoutPlan, onNonWorkoutChange, onWorkoutChange, onDeficitChange, onBack, onNext }: Props) {
   const proteinRec = recommendedProtein(profile.weight_kg, profile.goal);
   const [activePreset, setActivePreset] = useState<string | null>('Balanced');
+  const [deficit, setDeficit] = useState(profile.calorie_deficit ?? 0);
+
+  const netCalories = Math.max(0, tdee - deficit);
+  const workoutNetCalories = Math.round(netCalories * 1.1);
+
+  const handleApplyDeficit = () => {
+    const nwMacros = macrosFromDeficit(netCalories, profile.weight_kg, profile.goal);
+    const wMacros = macrosFromDeficit(workoutNetCalories, profile.weight_kg, profile.goal);
+    onNonWorkoutChange({
+      ...nonWorkoutPlan,
+      calorie_target: netCalories,
+      protein_target: nwMacros.protein,
+      carbs_target: nwMacros.carbs,
+      fat_target: nwMacros.fat,
+    });
+    onWorkoutChange({
+      ...workoutPlan,
+      calorie_target: workoutNetCalories,
+      protein_target: wMacros.protein,
+      carbs_target: wMacros.carbs,
+      fat_target: wMacros.fat,
+    });
+    onDeficitChange(deficit);
+    setActivePreset(null);
+  };
 
   const handlePreset = (split: MacroSplit) => {
     setActivePreset(split.label);
@@ -179,6 +205,58 @@ export default function MacroSetup({ tdee, profile, nonWorkoutPlan, workoutPlan,
       <p className="text-sm text-gray-500 mb-6">
         Based on your TDEE of <strong>{tdee} kcal</strong>. Pick a preset or fine-tune percentages and grams below.
       </p>
+
+      {/* Calorie Deficit */}
+      <div className="bg-white border border-gray-200 rounded-xl p-4 mb-6">
+        <h3 className="text-sm font-semibold text-gray-700 mb-3">Calorie Deficit</h3>
+        <div className="flex items-end gap-4 flex-wrap">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">TDEE</label>
+            <div className="text-lg font-bold text-gray-700">{tdee} kcal</div>
+          </div>
+          <div className="text-gray-400 text-xl font-light self-end pb-0.5">−</div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Daily deficit</label>
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                min={0}
+                max={tdee}
+                value={deficit}
+                onChange={(e) => setDeficit(Math.max(0, Number(e.target.value)))}
+                className="w-24 border border-gray-300 rounded-lg px-3 py-2 text-sm text-right focus:ring-2 focus:ring-emerald-500 outline-none"
+              />
+              <span className="text-sm text-gray-500">kcal</span>
+            </div>
+          </div>
+          <div className="text-gray-400 text-xl font-light self-end pb-0.5">=</div>
+          <div className="flex gap-4">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Non-workout day</label>
+              <div className={`text-lg font-bold ${deficit > 0 ? 'text-amber-600' : 'text-gray-700'}`}>
+                {netCalories} kcal
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Workout day</label>
+              <div className={`text-lg font-bold ${deficit > 0 ? 'text-amber-600' : 'text-gray-700'}`}>
+                {workoutNetCalories} kcal
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={handleApplyDeficit}
+            className="ml-auto px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 transition-colors cursor-pointer self-end"
+          >
+            Apply to both plans
+          </button>
+        </div>
+        {deficit > 0 && (
+          <p className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            Protein will be anchored to body weight ({proteinRec.min}–{proteinRec.max} g/day). Remaining calories are split 50/50 between carbs and fat.
+          </p>
+        )}
+      </div>
 
       {/* Protein Recommendation */}
       <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">

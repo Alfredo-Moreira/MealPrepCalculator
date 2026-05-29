@@ -128,6 +128,7 @@ export default function CreatePlan() {
         activity_level: profile.activity_level,
         goal: profile.goal,
         tdee: profile.tdee,
+        calorie_deficit: profile.calorie_deficit ?? 0,
       };
       const plans = [nonWorkoutPlan, workoutPlan];
 
@@ -208,6 +209,7 @@ export default function CreatePlan() {
           workoutPlan={workoutPlan}
           onNonWorkoutChange={setNonWorkoutPlan}
           onWorkoutChange={setWorkoutPlan}
+          onDeficitChange={(deficit) => setProfile((p) => ({ ...p, calorie_deficit: deficit }))}
           onBack={() => setStep(1)}
           onNext={() => {
             setBuildingDay('non_workout');

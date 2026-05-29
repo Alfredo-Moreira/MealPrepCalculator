@@ -25,6 +25,12 @@ docker buildx build \
   -t "${LATEST_TAG}" \
   "$(dirname "$0")/.."
 
+echo "==> Updating docker-compose.nas.yml image tag to ${TAG}"
+COMPOSE_FILE="${SCRIPT_DIR}/../docker-compose.nas.yml"
+sed -i '' \
+  "s|${REGISTRY}/${IMAGE_NAME}:[^ ]*|${FULL_TAG}|" \
+  "${COMPOSE_FILE}"
+
 echo "==> Done. Image available at ${FULL_TAG}"
 echo ""
 echo "Run with:"
