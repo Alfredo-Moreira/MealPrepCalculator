@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { fetchPlans, deletePlan, createPlan, syncFoods } from '../api';
+import { fetchPlans, deletePlan, createPlan, syncFoods, checkHealth } from '../api';
 import type { Profile } from '../types';
 
 export default function Dashboard() {
@@ -8,6 +8,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [importStatus, setImportStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [importing, setImporting] = useState(false);
+  const [dbOk, setDbOk] = useState<boolean | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = () => {
@@ -16,7 +17,10 @@ export default function Dashboard() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(load, []);
+  useEffect(() => {
+    load();
+    checkHealth().then(setDbOk);
+  }, []);
 
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -48,7 +52,7 @@ export default function Dashboard() {
     reader.readAsText(file);
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: string) => {
     if (!confirm('Delete this plan?')) return;
     await deletePlan(id);
     load();
@@ -61,13 +65,23 @@ export default function Dashboard() {
       <input ref={fileInputRef} type="file" accept=".json" onChange={handleImport} className="hidden" />
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-2xl font-semibold text-gray-800">Saved Meal Plans</h2>
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={importing}
-          className="px-3 py-1.5 border border-gray-300 rounded-lg text-xs text-gray-600 hover:bg-gray-100 transition-colors disabled:opacity-50 cursor-pointer"
-        >
-          {importing ? 'Importing…' : 'Import JSON'}
-        </button>
+        <div className="flex items-center gap-3">
+          {dbOk !== null && (
+            <span
+              title={dbOk ? 'Database connected' : 'Database unreachable'}
+              className={`flex items-center gap-1 text-xs font-medium ${dbOk ? 'text-emerald-600' : 'text-red-500'}`}
+            >
+              {dbOk ? '✓' : '✗'} DB
+            </span>
+          )}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importing}
+            className="px-3 py-1.5 border border-gray-300 rounded-lg text-xs text-gray-600 hover:bg-gray-100 transition-colors disabled:opacity-50 cursor-pointer"
+          >
+            {importing ? 'Importing…' : 'Import JSON'}
+          </button>
+        </div>
       </div>
       {importStatus && (
         <div className={`mb-4 px-4 py-3 rounded-lg text-sm ${importStatus.type === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>

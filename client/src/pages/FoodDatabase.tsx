@@ -1,6 +1,85 @@
 import { useState, useEffect, useRef } from 'react';
-import { fetchFoods, syncFoods } from '../api';
+import { fetchFoods, syncFoods, createFood, updateFood, deleteFood } from '../api';
 import type { FoodEntry } from '../api';
+
+type FoodForm = Omit<FoodEntry, 'id' | 'created_at'>;
+
+const emptyForm = (): FoodForm => ({
+  food_name: '',
+  serving_size: '',
+  base_calories: 0,
+  base_protein: 0,
+  base_carbs: 0,
+  base_fat: 0,
+});
+
+function FoodFormRow({
+  value,
+  onChange,
+  onSubmit,
+  onCancel,
+  submitLabel,
+  saving,
+}: {
+  value: FoodForm;
+  onChange: (f: FoodForm) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+  submitLabel: string;
+  saving: boolean;
+}) {
+  const num = (field: keyof FoodForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    onChange({ ...value, [field]: field === 'food_name' || field === 'serving_size' ? e.target.value : Number(e.target.value) });
+
+  return (
+    <tr className="bg-emerald-50">
+      <td className="px-3 py-2">
+        <input
+          className="w-full border border-gray-300 rounded px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+          placeholder="Food name *"
+          value={value.food_name}
+          onChange={num('food_name')}
+        />
+      </td>
+      <td className="px-3 py-2">
+        <input
+          className="w-full border border-gray-300 rounded px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+          placeholder="e.g. 100g"
+          value={value.serving_size}
+          onChange={num('serving_size')}
+        />
+      </td>
+      {(['base_calories', 'base_protein', 'base_carbs', 'base_fat'] as const).map((f) => (
+        <td key={f} className="px-3 py-2">
+          <input
+            type="number"
+            min={0}
+            className="w-full border border-gray-300 rounded px-2 py-1 text-sm text-right outline-none focus:ring-2 focus:ring-emerald-500"
+            value={value[f]}
+            onChange={num(f)}
+          />
+        </td>
+      ))}
+      <td className="px-3 py-2">
+        <div className="flex gap-1 justify-end">
+          <button
+            onClick={onSubmit}
+            disabled={saving || !value.food_name.trim()}
+            className="px-2 py-1 bg-emerald-600 text-white rounded text-xs hover:bg-emerald-700 disabled:opacity-50 cursor-pointer"
+          >
+            {saving ? '…' : submitLabel}
+          </button>
+          <button
+            onClick={onCancel}
+            className="px-2 py-1 border border-gray-300 rounded text-xs text-gray-600 hover:bg-gray-100 cursor-pointer"
+          >
+            Cancel
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+}
 
 export default function FoodDatabase() {
   const [foods, setFoods] = useState<FoodEntry[]>([]);
@@ -8,6 +87,13 @@ export default function FoodDatabase() {
   const [search, setSearch] = useState('');
   const [importStatus, setImportStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [importing, setImporting] = useState(false);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addForm, setAddForm] = useState<FoodForm>(emptyForm());
+  const [addSaving, setAddSaving] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<FoodForm>(emptyForm());
+  const [editSaving, setEditSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadFoods = () => fetchFoods().then(setFoods).finally(() => setLoading(false));
@@ -18,7 +104,6 @@ export default function FoodDatabase() {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = '';
-
     const reader = new FileReader();
     reader.onload = async (ev) => {
       setImporting(true);
@@ -27,14 +112,11 @@ export default function FoodDatabase() {
         const raw = JSON.parse(ev.target?.result as string);
         const items: unknown[] = Array.isArray(raw) ? raw : Array.isArray(raw?.items) ? raw.items : null;
         if (!items) throw new Error('JSON must be an array or an object with an "items" array.');
-
         const valid = items.filter((item): item is Parameters<typeof syncFoods>[0][number] => {
           const i = item as Record<string, unknown>;
           return typeof i.food_name === 'string' && typeof i.base_calories === 'number';
         });
-
         if (valid.length === 0) throw new Error('No valid food entries found. Each item needs at least "food_name" (string) and "base_calories" (number).');
-
         const { added } = await syncFoods(valid);
         setImportStatus({ type: 'success', message: `Imported ${added} new item${added !== 1 ? 's' : ''} (${valid.length} total in file).` });
         loadFoods();
@@ -45,6 +127,58 @@ export default function FoodDatabase() {
       }
     };
     reader.readAsText(file);
+  };
+
+  const handleAdd = async () => {
+    setAddSaving(true);
+    try {
+      const created = await createFood(addForm);
+      setFoods((prev) => [...prev, created].sort((a, b) => a.food_name.localeCompare(b.food_name)));
+      setAddForm(emptyForm());
+      setShowAddForm(false);
+    } catch (err: unknown) {
+      setImportStatus({ type: 'error', message: err instanceof Error ? err.message : 'Failed to add food.' });
+    } finally {
+      setAddSaving(false);
+    }
+  };
+
+  const startEdit = (food: FoodEntry) => {
+    setEditingId(food.id);
+    setEditForm({
+      food_name: food.food_name,
+      serving_size: food.serving_size ?? '',
+      base_calories: food.base_calories,
+      base_protein: food.base_protein,
+      base_carbs: food.base_carbs,
+      base_fat: food.base_fat,
+    });
+  };
+
+  const handleEdit = async () => {
+    if (!editingId) return;
+    setEditSaving(true);
+    try {
+      const updated = await updateFood(editingId, editForm);
+      setFoods((prev) => prev.map((f) => (f.id === editingId ? updated : f)));
+      setEditingId(null);
+    } catch (err: unknown) {
+      setImportStatus({ type: 'error', message: err instanceof Error ? err.message : 'Failed to update food.' });
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    setDeletingId(id);
+    try {
+      await deleteFood(id);
+      setFoods((prev) => prev.filter((f) => f.id !== id));
+    } catch (err: unknown) {
+      setImportStatus({ type: 'error', message: err instanceof Error ? err.message : 'Failed to delete food.' });
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const filtered = foods.filter((f) =>
@@ -80,6 +214,12 @@ export default function FoodDatabase() {
           >
             {importing ? 'Importing…' : 'Import JSON'}
           </button>
+          <button
+            onClick={() => { setShowAddForm(true); setEditingId(null); }}
+            className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs hover:bg-emerald-700 transition-colors cursor-pointer"
+          >
+            + Add Food
+          </button>
         </div>
       </div>
 
@@ -100,11 +240,6 @@ export default function FoodDatabase() {
 
       {loading ? (
         <p className="text-gray-500 text-sm">Loading...</p>
-      ) : filtered.length === 0 ? (
-        <div className="text-center py-16 text-gray-400">
-          <p className="text-lg font-medium mb-1">No foods found</p>
-          <p className="text-sm">Foods are added automatically when you save a meal plan.</p>
-        </div>
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <table className="w-full text-sm">
@@ -116,19 +251,68 @@ export default function FoodDatabase() {
                 <th className="text-right px-4 py-3 font-semibold text-gray-600">Protein</th>
                 <th className="text-right px-4 py-3 font-semibold text-gray-600">Carbs</th>
                 <th className="text-right px-4 py-3 font-semibold text-gray-600">Fat</th>
+                <th className="text-right px-4 py-3 font-semibold text-gray-600">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {filtered.map((f) => (
-                <tr key={f.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3 font-medium text-gray-800">{f.food_name}</td>
-                  <td className="px-4 py-3 text-gray-500">{f.serving_size || '—'}</td>
-                  <td className="px-4 py-3 text-right text-gray-700">{f.base_calories} kcal</td>
-                  <td className="px-4 py-3 text-right text-gray-700">{f.base_protein}g</td>
-                  <td className="px-4 py-3 text-right text-gray-700">{f.base_carbs}g</td>
-                  <td className="px-4 py-3 text-right text-gray-700">{f.base_fat}g</td>
+              {showAddForm && (
+                <FoodFormRow
+                  value={addForm}
+                  onChange={setAddForm}
+                  onSubmit={handleAdd}
+                  onCancel={() => { setShowAddForm(false); setAddForm(emptyForm()); }}
+                  submitLabel="Add"
+                  saving={addSaving}
+                />
+              )}
+              {filtered.length === 0 && !showAddForm ? (
+                <tr>
+                  <td colSpan={7} className="text-center py-16 text-gray-400">
+                    <p className="text-lg font-medium mb-1">No foods found</p>
+                    <p className="text-sm">Foods are added automatically when you save a meal plan, or manually via "+ Add Food".</p>
+                  </td>
                 </tr>
-              ))}
+              ) : (
+                filtered.map((f) =>
+                  editingId === f.id ? (
+                    <FoodFormRow
+                      key={f.id}
+                      value={editForm}
+                      onChange={setEditForm}
+                      onSubmit={handleEdit}
+                      onCancel={() => setEditingId(null)}
+                      submitLabel="Save"
+                      saving={editSaving}
+                    />
+                  ) : (
+                    <tr key={f.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-4 py-3 font-medium text-gray-800">{f.food_name}</td>
+                      <td className="px-4 py-3 text-gray-500">{f.serving_size || '—'}</td>
+                      <td className="px-4 py-3 text-right text-gray-700">{f.base_calories} kcal</td>
+                      <td className="px-4 py-3 text-right text-gray-700">{f.base_protein}g</td>
+                      <td className="px-4 py-3 text-right text-gray-700">{f.base_carbs}g</td>
+                      <td className="px-4 py-3 text-right text-gray-700">{f.base_fat}g</td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex gap-1 justify-end">
+                          <button
+                            onClick={() => startEdit(f)}
+                            className="px-2 py-1 border border-gray-300 rounded text-xs text-gray-600 hover:bg-gray-100 cursor-pointer"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDelete(f.id)}
+                            disabled={deletingId === f.id}
+                            className="px-2 py-1 border border-red-200 rounded text-xs text-red-600 hover:bg-red-50 disabled:opacity-50 cursor-pointer"
+                          >
+                            {deletingId === f.id ? '…' : 'Delete'}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                )
+              )}
             </tbody>
           </table>
         </div>

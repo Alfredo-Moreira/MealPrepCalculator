@@ -7,13 +7,13 @@ export async function fetchPlans(): Promise<Profile[]> {
   return res.json();
 }
 
-export async function fetchPlan(profileId: number): Promise<{ profile: Profile; plans: MealPlan[] }> {
+export async function fetchPlan(profileId: string): Promise<{ profile: Profile; plans: MealPlan[] }> {
   const res = await fetch(`${BASE}/plans/${profileId}`);
   if (!res.ok) throw new Error('Plan not found');
   return res.json();
 }
 
-export async function createPlan(data: { profile: Omit<Profile, 'id' | 'created_at'>; plans: MealPlan[] }): Promise<{ id: number }> {
+export async function createPlan(data: { profile: Omit<Profile, 'id' | 'created_at'>; plans: MealPlan[] }): Promise<{ id: string }> {
   const res = await fetch(`${BASE}/plans`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -23,7 +23,7 @@ export async function createPlan(data: { profile: Omit<Profile, 'id' | 'created_
   return res.json();
 }
 
-export async function updatePlan(profileId: number, data: { profile: Omit<Profile, 'id' | 'created_at'>; plans: MealPlan[] }): Promise<void> {
+export async function updatePlan(profileId: string, data: { profile: Omit<Profile, 'id' | 'created_at'>; plans: MealPlan[] }): Promise<void> {
   const res = await fetch(`${BASE}/plans/${profileId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -32,12 +32,12 @@ export async function updatePlan(profileId: number, data: { profile: Omit<Profil
   if (!res.ok) throw new Error('Failed to update plan');
 }
 
-export async function deletePlan(profileId: number): Promise<void> {
+export async function deletePlan(profileId: string): Promise<void> {
   await fetch(`${BASE}/plans/${profileId}`, { method: 'DELETE' });
 }
 
 export interface FoodEntry {
-  id: number;
+  id: string;
   food_name: string;
   serving_size: string;
   base_calories: number;
@@ -55,6 +55,40 @@ export async function fetchFoods(): Promise<FoodEntry[]> {
 export async function searchFoods(q: string): Promise<FoodEntry[]> {
   const res = await fetch(`${BASE}/foods/search?q=${encodeURIComponent(q)}`);
   return res.json();
+}
+
+export async function checkHealth(): Promise<boolean> {
+  try {
+    const res = await fetch(`${BASE}/health`);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function createFood(item: Omit<FoodEntry, 'id' | 'created_at'>): Promise<FoodEntry> {
+  const res = await fetch(`${BASE}/foods`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(item),
+  });
+  if (!res.ok) throw new Error((await res.json()).error ?? 'Failed to create food');
+  return res.json();
+}
+
+export async function updateFood(id: string, item: Omit<FoodEntry, 'id' | 'created_at'>): Promise<FoodEntry> {
+  const res = await fetch(`${BASE}/foods/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(item),
+  });
+  if (!res.ok) throw new Error((await res.json()).error ?? 'Failed to update food');
+  return res.json();
+}
+
+export async function deleteFood(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/foods/${id}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to delete food');
 }
 
 export async function syncFoods(items: Array<{

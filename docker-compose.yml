@@ -1,0 +1,26 @@
+## LOCAL DEVELOPMENT
+services:
+  mongo:
+    image: mongo:7
+    container_name: mongo-local
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  meal-prep-calculator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: meal-prep-calculator-local
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/meal-prep
+    depends_on:
+      - mongo
+
+volumes:
+  mongo-data:

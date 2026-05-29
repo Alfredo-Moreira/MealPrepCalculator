@@ -22,7 +22,7 @@ export default function ViewPlan() {
 
   useEffect(() => {
     if (!id) return;
-    fetchPlan(Number(id))
+    fetchPlan(id)
       .then(({ profile, plans }) => {
         setProfile(profile);
         setPlans(plans);
@@ -74,6 +74,13 @@ export default function ViewPlan() {
               className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors no-underline"
             >
               Edit Plan
+            </Link>
+            <Link
+              to="/create"
+              state={{ profile: { ...profile, name: `Copy of ${profile.name}` }, plans }}
+              className="border border-emerald-500 text-emerald-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-50 transition-colors no-underline"
+            >
+              Duplicate
             </Link>
             <button
               onClick={() => setPreviewUrl(previewPDFUrl(profile, plans))}
@@ -218,8 +225,8 @@ export default function ViewPlan() {
                       <th className="pb-1 font-medium">Food</th>
                       <th className="pb-1 font-medium text-right">Serving</th>
                       <th className="pb-1 font-medium text-right">Qty</th>
-                      <th className="pb-1 font-medium text-right">Total</th>
-                      <th className="pb-1 font-bold text-right">Cal</th>
+                      <th className="pb-1 font-bold text-right">Total</th>
+                      <th className="pb-1 font-medium text-right">Cal</th>
                       <th className="pb-1 font-medium text-right">P</th>
                       <th className="pb-1 font-medium text-right">C</th>
                       <th className="pb-1 font-medium text-right">F</th>
@@ -251,8 +258,8 @@ export default function ViewPlan() {
                             </td>
                             <td className="py-1.5 px-1 text-right text-gray-600">{item.serving_size}</td>
                             <td className="py-1.5 px-1 text-right text-gray-500">{item.multiplier}x</td>
-                            <td className="py-1.5 px-1 text-right text-gray-600">{totalServing}</td>
-                            <td className="py-1.5 px-1 text-right font-bold text-gray-900">{item.calories}</td>
+                            <td className="py-1.5 px-1 text-right font-bold text-gray-900">{totalServing}</td>
+                            <td className="py-1.5 px-1 text-right text-gray-600">{item.calories}</td>
                             <td className="py-1.5 px-1 text-right text-gray-600">{item.protein}g</td>
                             <td className="py-1.5 px-1 text-right text-gray-600">{item.carbs}g</td>
                             <td className="py-1.5 px-1 text-right text-gray-600">{item.fat}g</td>

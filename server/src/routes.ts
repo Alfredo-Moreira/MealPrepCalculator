@@ -1,217 +1,227 @@
 import { Router } from 'express';
-import { getDb } from './db';
+import mongoose from 'mongoose';
+import { Profile, MealPlan, Food } from './db';
 
 export const planRoutes = Router();
 
-// List all profiles with their meal plans (summary)
-planRoutes.get('/plans', (_req, res) => {
-  const db = getDb();
-  const profiles = db.prepare(`
-    SELECT p.*,
-      (SELECT COUNT(*) FROM meal_plans mp WHERE mp.profile_id = p.id) as plan_count
-    FROM profiles p
-    ORDER BY p.created_at DESC
-  `).all();
-  res.json(profiles);
+planRoutes.get('/health', (_req, res) => {
+  const connected = mongoose.connection.readyState === 1;
+  res.status(connected ? 200 : 503).json({ db: connected ? 'ok' : 'error' });
+});
+
+function normaliseItems(items: any[]) {
+  return items.map((item: any) => ({
+    ...item,
+    multiplier: item.multiplier ?? 1,
+    base_calories: item.base_calories ?? item.calories,
+    base_protein: item.base_protein ?? item.protein,
+    base_carbs: item.base_carbs ?? item.carbs,
+    base_fat: item.base_fat ?? item.fat,
+    substitutes: item.substitutes ?? [],
+  }));
+}
+
+// List all profiles with meal plan count
+planRoutes.get('/plans', async (_req, res) => {
+  try {
+    const profiles = await Profile.find().sort({ created_at: -1 });
+    const result = await Promise.all(
+      profiles.map(async (p) => {
+        const plan_count = await MealPlan.countDocuments({ profile_id: p._id });
+        return { ...p.toJSON(), plan_count };
+      })
+    );
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Get full plan detail
-planRoutes.get('/plans/:profileId', (req, res) => {
-  const db = getDb();
-  const profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(req.params.profileId);
-  if (!profile) return res.status(404).json({ error: 'Profile not found' });
+planRoutes.get('/plans/:profileId', async (req, res) => {
+  try {
+    const profile = await Profile.findById(req.params.profileId);
+    if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
-  const mealPlans = db.prepare('SELECT * FROM meal_plans WHERE profile_id = ?').all(req.params.profileId);
-  const plans = (mealPlans as any[]).map((plan) => {
-    const rawItems = db.prepare('SELECT * FROM meal_items WHERE meal_plan_id = ?').all(plan.id) as any[];
-    const items = rawItems.map(({ substitutes_json, ...item }) => ({
-      ...item,
-      substitutes: JSON.parse(substitutes_json || '[]'),
-    }));
-    return { ...plan, items };
-  });
-
-  res.json({ profile, plans });
+    const mealPlans = await MealPlan.find({ profile_id: profile._id });
+    res.json({ profile: profile.toJSON(), plans: mealPlans.map((p) => p.toJSON()) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Create profile + meal plans + items in one transaction
-planRoutes.post('/plans', (req, res) => {
-  const db = getDb();
-  const { profile, plans } = req.body;
-
-  const insertProfile = db.prepare(`
-    INSERT INTO profiles (name, age, gender, weight_kg, height_cm, activity_level, goal, tdee)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const insertPlan = db.prepare(`
-    INSERT INTO meal_plans (profile_id, name, plan_type, calorie_target, protein_target, carbs_target, fat_target)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const insertItem = db.prepare(`
-    INSERT INTO meal_items (meal_plan_id, meal_label, food_name, serving_size, multiplier, base_calories, base_protein, base_carbs, base_fat, calories, protein, carbs, fat, substitutes_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const transaction = db.transaction(() => {
-    const profileResult = insertProfile.run(
-      profile.name, profile.age, profile.gender,
-      profile.weight_kg, profile.height_cm, profile.activity_level, profile.goal, profile.tdee
-    );
-    const profileId = profileResult.lastInsertRowid;
-
-    for (const plan of plans) {
-      const planResult = insertPlan.run(
-        profileId, plan.name, plan.plan_type,
-        plan.calorie_target, plan.protein_target, plan.carbs_target, plan.fat_target
-      );
-      const planId = planResult.lastInsertRowid;
-
-      for (const item of plan.items) {
-        insertItem.run(
-          planId, item.meal_label, item.food_name, item.serving_size,
-          item.multiplier ?? 1, item.base_calories ?? item.calories, item.base_protein ?? item.protein, item.base_carbs ?? item.carbs, item.base_fat ?? item.fat,
-          item.calories, item.protein, item.carbs, item.fat,
-          JSON.stringify(item.substitutes ?? [])
-        );
-      }
-    }
-
-    return profileId;
-  });
-
+// Create profile + meal plans + items
+planRoutes.post('/plans', async (req, res) => {
   try {
-    const profileId = transaction();
-    res.status(201).json({ id: profileId });
+    const { profile: profileData, plans } = req.body;
+
+    if (profileData.calorie_deficit == null) profileData.calorie_deficit = 0;
+    const profile = await Profile.create(profileData);
+
+    await Promise.all(
+      plans.map((plan: any) =>
+        MealPlan.create({
+          profile_id: profile._id,
+          name: plan.name,
+          plan_type: plan.plan_type,
+          calorie_target: plan.calorie_target,
+          protein_target: plan.protein_target,
+          carbs_target: plan.carbs_target,
+          fat_target: plan.fat_target,
+          items: normaliseItems(plan.items ?? []),
+        })
+      )
+    );
+
+    res.status(201).json({ id: profile._id.toString() });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }
 });
 
-// Update profile + meal plans + items (replace all)
-planRoutes.put('/plans/:profileId', (req, res) => {
-  const db = getDb();
-  const { profile, plans } = req.body;
-  const profileId = req.params.profileId;
+// Update profile + replace all meal plans and items
+planRoutes.put('/plans/:profileId', async (req, res) => {
+  try {
+    const { profile: profileData, plans } = req.body;
 
-  const existing = db.prepare('SELECT id FROM profiles WHERE id = ?').get(profileId);
-  if (!existing) return res.status(404).json({ error: 'Profile not found' });
+    const profile = await Profile.findByIdAndUpdate(
+      req.params.profileId,
+      { $set: profileData },
+      { new: true }
+    );
+    if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
-  const updateProfile = db.prepare(`
-    UPDATE profiles SET name = ?, age = ?, gender = ?, weight_kg = ?, height_cm = ?, activity_level = ?, goal = ?, tdee = ?
-    WHERE id = ?
-  `);
+    await MealPlan.deleteMany({ profile_id: profile._id });
 
-  const deletePlans = db.prepare('DELETE FROM meal_plans WHERE profile_id = ?');
-
-  const insertPlan = db.prepare(`
-    INSERT INTO meal_plans (profile_id, name, plan_type, calorie_target, protein_target, carbs_target, fat_target)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const insertItem = db.prepare(`
-    INSERT INTO meal_items (meal_plan_id, meal_label, food_name, serving_size, multiplier, base_calories, base_protein, base_carbs, base_fat, calories, protein, carbs, fat, substitutes_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const transaction = db.transaction(() => {
-    updateProfile.run(
-      profile.name, profile.age, profile.gender,
-      profile.weight_kg, profile.height_cm, profile.activity_level, profile.goal, profile.tdee,
-      profileId
+    await Promise.all(
+      plans.map((plan: any) =>
+        MealPlan.create({
+          profile_id: profile._id,
+          name: plan.name,
+          plan_type: plan.plan_type,
+          calorie_target: plan.calorie_target,
+          protein_target: plan.protein_target,
+          carbs_target: plan.carbs_target,
+          fat_target: plan.fat_target,
+          items: normaliseItems(plan.items ?? []),
+        })
+      )
     );
 
-    // Delete old plans (cascades to items) and re-insert
-    deletePlans.run(profileId);
-
-    for (const plan of plans) {
-      const planResult = insertPlan.run(
-        profileId, plan.name, plan.plan_type,
-        plan.calorie_target, plan.protein_target, plan.carbs_target, plan.fat_target
-      );
-      const planId = planResult.lastInsertRowid;
-
-      for (const item of plan.items) {
-        insertItem.run(
-          planId, item.meal_label, item.food_name, item.serving_size,
-          item.multiplier ?? 1, item.base_calories ?? item.calories, item.base_protein ?? item.protein, item.base_carbs ?? item.carbs, item.base_fat ?? item.fat,
-          item.calories, item.protein, item.carbs, item.fat,
-          JSON.stringify(item.substitutes ?? [])
-        );
-      }
-    }
-  });
-
-  try {
-    transaction();
     res.json({ success: true });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }
 });
 
-// Delete profile and cascade
-planRoutes.delete('/plans/:profileId', (req, res) => {
-  const db = getDb();
-  const result = db.prepare('DELETE FROM profiles WHERE id = ?').run(req.params.profileId);
-  if (result.changes === 0) return res.status(404).json({ error: 'Profile not found' });
-  res.json({ success: true });
+// Delete profile and its meal plans
+planRoutes.delete('/plans/:profileId', async (req, res) => {
+  try {
+    const profile = await Profile.findByIdAndDelete(req.params.profileId);
+    if (!profile) return res.status(404).json({ error: 'Profile not found' });
+
+    await MealPlan.deleteMany({ profile_id: profile._id });
+
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// List all foods in the database
-planRoutes.get('/foods', (_req, res) => {
-  const db = getDb();
-  const foods = db.prepare('SELECT * FROM food_database ORDER BY food_name ASC').all();
-  res.json(foods);
+// List all foods
+planRoutes.get('/foods', async (_req, res) => {
+  try {
+    const foods = await Food.find().sort({ food_name: 1 });
+    res.json(foods.map((f) => f.toJSON()));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Search foods by name (autocomplete)
-planRoutes.get('/foods/search', (req, res) => {
-  const db = getDb();
-  const q = (req.query.q as string) ?? '';
-  const foods = db
-    .prepare("SELECT * FROM food_database WHERE food_name LIKE ? ORDER BY food_name ASC LIMIT 10")
-    .all(`%${q}%`);
-  res.json(foods);
+planRoutes.get('/foods/search', async (req, res) => {
+  try {
+    const q = (req.query.q as string) ?? '';
+    const foods = await Food.find({ food_name: { $regex: q, $options: 'i' } })
+      .sort({ food_name: 1 })
+      .limit(10);
+    res.json(foods.map((f) => f.toJSON()));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Sync food items into the database (upsert by unique constraint)
-planRoutes.post('/foods/sync', (req, res) => {
-  const db = getDb();
-  const items: Array<{
-    food_name: string;
-    serving_size?: string;
-    base_calories: number;
-    base_protein: number;
-    base_carbs: number;
-    base_fat: number;
-  }> = req.body.items ?? [];
+// Create a single food entry
+planRoutes.post('/foods', async (req, res) => {
+  try {
+    const { food_name, serving_size, base_calories, base_protein, base_carbs, base_fat } = req.body;
+    if (!food_name?.trim() || base_calories == null) {
+      return res.status(400).json({ error: 'food_name and base_calories are required' });
+    }
+    const food = await Food.create({
+      food_name: food_name.trim(),
+      serving_size: serving_size ?? '',
+      base_calories,
+      base_protein: base_protein ?? 0,
+      base_carbs: base_carbs ?? 0,
+      base_fat: base_fat ?? 0,
+    });
+    res.status(201).json(food.toJSON());
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
 
-  const insert = db.prepare(`
-    INSERT OR IGNORE INTO food_database (food_name, serving_size, base_calories, base_protein, base_carbs, base_fat)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `);
+// Update a food entry
+planRoutes.put('/foods/:id', async (req, res) => {
+  try {
+    const { food_name, serving_size, base_calories, base_protein, base_carbs, base_fat } = req.body;
+    const food = await Food.findByIdAndUpdate(
+      req.params.id,
+      { $set: { food_name: food_name?.trim(), serving_size, base_calories, base_protein, base_carbs, base_fat } },
+      { new: true, runValidators: true }
+    );
+    if (!food) return res.status(404).json({ error: 'Food not found' });
+    res.json(food.toJSON());
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
 
-  const transaction = db.transaction(() => {
+// Delete a food entry
+planRoutes.delete('/foods/:id', async (req, res) => {
+  try {
+    const food = await Food.findByIdAndDelete(req.params.id);
+    if (!food) return res.status(404).json({ error: 'Food not found' });
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Bulk upsert foods into the database
+planRoutes.post('/foods/sync', async (req, res) => {
+  try {
+    const items: any[] = req.body.items ?? [];
     let added = 0;
+
     for (const item of items) {
       if (!item.food_name?.trim() || !item.base_calories) continue;
-      const result = insert.run(
-        item.food_name.trim(),
-        item.serving_size ?? '',
-        item.base_calories,
-        item.base_protein,
-        item.base_carbs,
-        item.base_fat
+      const filter = {
+        food_name: item.food_name.trim(),
+        base_calories: item.base_calories,
+        base_protein: item.base_protein,
+        base_carbs: item.base_carbs,
+        base_fat: item.base_fat,
+      };
+      const result = await Food.updateOne(
+        filter,
+        { $setOnInsert: { ...filter, serving_size: item.serving_size ?? '' } },
+        { upsert: true }
       );
-      if (result.changes > 0) added++;
+      if (result.upsertedCount > 0) added++;
     }
-    return added;
-  });
 
-  try {
-    const added = transaction();
     res.json({ added });
   } catch (err: any) {
     res.status(400).json({ error: err.message });

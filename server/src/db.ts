@@ -1,81 +1,80 @@
-import Database from 'better-sqlite3';
-import path from 'path';
+import mongoose, { Schema, model } from 'mongoose';
 
-const DB_PATH = path.join(__dirname, '../../data.db');
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/meal-prep';
 
-let db: Database.Database;
+const idTransform = (_: unknown, ret: Record<string, unknown>) => {
+  ret.id = (ret._id as object).toString();
+  delete ret._id;
+  delete ret.__v;
+  return ret;
+};
 
-export function getDb(): Database.Database {
-  if (!db) {
-    db = new Database(DB_PATH);
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
-  }
-  return db;
-}
+const MealItemSchema = new Schema(
+  {
+    meal_label: String,
+    food_name: String,
+    serving_size: String,
+    multiplier: { type: Number, default: 1 },
+    base_calories: Number,
+    base_protein: Number,
+    base_carbs: Number,
+    base_fat: Number,
+    calories: Number,
+    protein: Number,
+    carbs: Number,
+    fat: Number,
+    substitutes: { type: Schema.Types.Mixed, default: [] },
+  },
+  { _id: false }
+);
 
-export function initDb() {
-  const db = getDb();
+const MealPlanSchema = new Schema({
+  profile_id: { type: Schema.Types.ObjectId, ref: 'Profile', required: true },
+  name: String,
+  plan_type: String,
+  calorie_target: Number,
+  protein_target: Number,
+  carbs_target: Number,
+  fat_target: Number,
+  items: { type: [MealItemSchema], default: [] },
+  created_at: { type: Date, default: Date.now },
+});
+MealPlanSchema.set('toJSON', { transform: idTransform });
 
-  // Idempotent migration: add substitutes_json if missing
-  const cols = db.prepare('PRAGMA table_info(meal_items)').all() as { name: string }[];
-  if (!cols.some(c => c.name === 'substitutes_json')) {
-    db.exec("ALTER TABLE meal_items ADD COLUMN substitutes_json TEXT DEFAULT '[]'");
-  }
+const ProfileSchema = new Schema({
+  name: String,
+  age: Number,
+  gender: String,
+  weight_kg: Number,
+  height_cm: Number,
+  activity_level: String,
+  goal: { type: String, default: 'maintain' },
+  tdee: Number,
+  calorie_deficit: { type: Number, default: 0 },
+  created_at: { type: Date, default: Date.now },
+});
+ProfileSchema.set('toJSON', { transform: idTransform });
 
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS profiles (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      age INTEGER,
-      gender TEXT,
-      weight_kg REAL,
-      height_cm REAL,
-      activity_level TEXT,
-      goal TEXT DEFAULT 'maintain',
-      tdee REAL,
-      created_at TEXT DEFAULT (datetime('now'))
-    );
+const FoodSchema = new Schema({
+  food_name: { type: String, required: true },
+  serving_size: String,
+  base_calories: Number,
+  base_protein: Number,
+  base_carbs: Number,
+  base_fat: Number,
+  created_at: { type: Date, default: Date.now },
+});
+FoodSchema.index(
+  { food_name: 1, base_calories: 1, base_protein: 1, base_carbs: 1, base_fat: 1 },
+  { unique: true }
+);
+FoodSchema.set('toJSON', { transform: idTransform });
 
-    CREATE TABLE IF NOT EXISTS meal_plans (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      profile_id INTEGER REFERENCES profiles(id) ON DELETE CASCADE,
-      name TEXT NOT NULL,
-      plan_type TEXT NOT NULL,
-      calorie_target REAL,
-      protein_target REAL,
-      carbs_target REAL,
-      fat_target REAL,
-      created_at TEXT DEFAULT (datetime('now'))
-    );
+export const Profile = model('Profile', ProfileSchema);
+export const MealPlan = model('MealPlan', MealPlanSchema);
+export const Food = model('Food', FoodSchema);
 
-    CREATE TABLE IF NOT EXISTS meal_items (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      meal_plan_id INTEGER REFERENCES meal_plans(id) ON DELETE CASCADE,
-      meal_label TEXT,
-      food_name TEXT NOT NULL,
-      serving_size TEXT,
-      multiplier REAL DEFAULT 1,
-      base_calories REAL,
-      base_protein REAL,
-      base_carbs REAL,
-      base_fat REAL,
-      calories REAL,
-      protein REAL,
-      carbs REAL,
-      fat REAL
-    );
-
-    CREATE TABLE IF NOT EXISTS food_database (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      food_name TEXT NOT NULL,
-      serving_size TEXT,
-      base_calories REAL,
-      base_protein REAL,
-      base_carbs REAL,
-      base_fat REAL,
-      created_at TEXT DEFAULT (datetime('now')),
-      UNIQUE(food_name, base_calories, base_protein, base_carbs, base_fat)
-    );
-  `);
+export async function connectDb() {
+  await mongoose.connect(MONGODB_URI);
+  console.log('Connected to MongoDB');
 }

@@ -1,5 +1,5 @@
 export interface Profile {
-  id?: number;
+  id?: string;
   name: string;
   age: number;
   gender: 'male' | 'female';
@@ -8,6 +8,7 @@ export interface Profile {
   activity_level: string;
   goal: 'maintain' | 'build_muscle' | 'lose_weight';
   tdee: number;
+  calorie_deficit?: number;
   created_at?: string;
   plan_count?: number;
 }
@@ -37,8 +38,8 @@ export function computeSubstitute(sub: MealSubstitute, parentCalories: number) {
 }
 
 export interface MealItem {
-  id?: number;
-  meal_plan_id?: number;
+  id?: string;
+  meal_plan_id?: string;
   meal_label: string;
   food_name: string;
   serving_size: string;
@@ -55,8 +56,8 @@ export interface MealItem {
 }
 
 export interface MealPlan {
-  id?: number;
-  profile_id?: number;
+  id?: string;
+  profile_id?: string;
   name: string;
   plan_type: 'workout' | 'non_workout';
   calorie_target: number;
@@ -96,6 +97,21 @@ export function calculateTDEE(profile: Pick<Profile, 'weight_kg' | 'height_cm' |
 
   const factor = ACTIVITY_FACTORS[activity_level]?.factor ?? 1.2;
   return Math.round(bmr * factor);
+}
+
+export function macrosFromDeficit(
+  netCalories: number,
+  weight_kg: number,
+  goal: Profile['goal'],
+): { protein: number; carbs: number; fat: number } {
+  const rec = recommendedProtein(weight_kg, goal);
+  const protein = Math.round((rec.min + rec.max) / 2);
+  const remaining = Math.max(0, netCalories - protein * 4);
+  return {
+    protein,
+    carbs: Math.round((remaining * 0.5) / 4),
+    fat: Math.round((remaining * 0.5) / 9),
+  };
 }
 
 export function macrosFromCalories(calories: number, split = { protein: 0.3, carbs: 0.4, fat: 0.3 }) {
