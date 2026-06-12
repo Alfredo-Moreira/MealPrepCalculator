@@ -40,33 +40,45 @@ This is a full-stack monorepo:
 - `server/` — Express 5 + TypeScript + Mongoose API
 - `VERSION` — plain-text semver used by the Docker build script to tag images
 
+> The app is branded **MacroLeaf** ("Fuel, balanced."). Two design/feature docs sit at the repo
+> root and are the source of truth for intent: `REDESIGN.md` (visual/brand system) and
+> `FEATURE_PLAN.md` (users, plan sequences, check-ins, progress — incl. ERD + STRIDE notes).
+
 ### Data model
 
-MongoDB via Mongoose (`server/src/db.ts`). Three collections:
+MongoDB via Mongoose (`server/src/db.ts`). Collections:
 
-- `profiles` — user biometrics and fitness goal
-- `mealplans` — workout/non-workout day plans linked to a profile; each document embeds an `items` array of meal entries
-- `foods` — reusable food library with per-serving macro data; unique index on `(food_name, base_calories, base_protein, base_carbs, base_fat)`
+- `users` — a person who owns meal plans (`name`, `notes`). **Organizational only, not an auth boundary** — the app has no authentication (local/personal use by design).
+- `profiles` — what the UI calls a *meal plan*: biometrics, goal, TDEE, plus `user_id`, `start_date`, `end_date`, `status` (`planned|active|completed|archived`), `sequence` (per-user 1-based order), and `previous_plan_id`.
+- `mealplans` — workout/non-workout *day plans* linked to a profile; each embeds an `items` array of meal entries.
+- `checkins` — end-of-plan / interim progress entries against a profile (`date`, `weight_kg`, 1–5 ratings: `energy`/`adherence`/`hunger`/`progress_rating`, `notes`).
+- `foods` — reusable food library; unique index on `(food_name, base_calories, base_protein, base_carbs, base_fat)`.
 
-A `profile` has many `mealplans` (typically one `workout`, one `non_workout`). Items are embedded in the plan document rather than stored in a separate collection.
+**Terminology (code vs. UI):** a `User` owns many `Profile`s (the UI calls a Profile a "meal plan"), ordered by `sequence`. Each `Profile` has child `MealPlan` day-plans (typically one `workout`, one `non_workout`) with embedded items, plus zero-or-more `CheckIn`s. See `FEATURE_PLAN.md` for the ERD.
 
 ### Server
 
-`server/src/index.ts` calls `connectDb()` (Mongoose connect), mounts all routes under `/api`, and serves the client dist in production. If the DB connection fails on startup the process exits. All routes live in `server/src/routes.ts` — create/update replace child documents via Mongoose operations. The food database is populated via a `POST /api/foods/sync` upsert that runs automatically whenever a plan is saved. A `GET /api/health` endpoint reports live Mongoose connection state (`readyState === 1`).
+`server/src/index.ts` calls `connectDb()` (Mongoose connect), mounts all routes under `/api` (JSON body capped at 1 MB), and serves the client dist in production. If the DB connection fails on startup the process exits. All routes live in `server/src/routes.ts`, grouped: `/api/users*` (user CRUD + `GET /users/:id/progress` aggregation for the dashboard), `/api/plans*` (profiles/meal plans; `POST` auto-assigns the next per-user `sequence` and falls back to a default "Me" user), `/api/plans/:id/checkins` + `/api/checkins/:id` (check-in CRUD), and `/api/foods*`. The food database is populated via a `POST /api/foods/sync` upsert that runs whenever a plan is saved. `GET /api/health` reports live Mongoose connection state (`readyState === 1`). Inputs are validated with `mongoose.isValidObjectId` + field whitelisting (no mass-assignment / `$`-operator injection); deletes **cascade in application code** since Mongo has no FKs.
 
 ### Client
 
-**Shared logic** in `client/src/types.ts`: all TypeScript interfaces (`Profile`, `MealPlan`, `MealItem`, `WizardState`), TDEE calculation (`calculateTDEE` uses Mifflin-St Jeor), macro helpers (`macrosFromCalories`, `recommendedProtein`), and constants.
+**Routing** (`App.tsx`): `/` → `Users` (home), `/user/:id` → `UserDetail`, `/create` → `CreatePlan`, `/plan/:id` → `ViewPlan`, `/foods` → `FoodDatabase`. A branded `SplashScreen` plays once per session on first load (gated by `sessionStorage`, skippable, reduced-motion aware). Routes fade/slide via framer-motion.
 
-**API layer** in `client/src/api.ts`: thin `fetch` wrappers for all server endpoints, including `checkHealth()` which hits `GET /api/health` and returns a boolean.
+**Design system:** tokens live in `client/src/index.css` (`@theme` — calm-wellness palette, macro colors, `Manrope` font). Reusable primitives in `client/src/components/ui.tsx` (`Button`, `Card`, `Chip`, `Stat`), the SVG icon pack in `components/icons.tsx` (`BrandMark` + UI/nutrition icons, all `currentColor`). See `REDESIGN.md`.
 
-**Create/Edit flow** (`client/src/pages/CreatePlan.tsx`): a 3-step wizard — Step 1 `BiomarkerForm` (biometrics), Step 2 `MacroSetup` (calorie & macro targets), Step 3 `MealBuilder` (food items per meal). Editing is triggered by navigating to `/create` with `location.state = { editId, profile, plans }`. The wizard can export/import its in-progress state as JSON.
+**Shared logic** in `client/src/types.ts`: interfaces (`Profile`, `MealPlan`, `MealItem`, `User`, `CheckIn`, `ProgressData`), TDEE (`calculateTDEE`, Mifflin-St Jeor), macro helpers, and constants (`PLAN_STATUSES`, `CHECKIN_QUESTIONS`).
 
-**Key design detail — `base_` vs effective macros:** `MealItem` stores both `base_calories/protein/carbs/fat` (per 1 serving) and `calories/protein/carbs/fat` (after applying `multiplier`). `MealBuilder` always writes the base values and recomputes effective values via `applyMultiplier` on every change. The `foods` collection only stores base values.
+**API layer** in `client/src/api.ts`: thin `fetch` wrappers for all endpoints (users, plans, check-ins, progress, foods), including `checkHealth()`.
 
-**PDF export** (`client/src/pdf.ts`): uses jsPDF to generate a multi-page PDF — page 1 has biometrics and macro overview, subsequent pages have per-plan food tables.
+**Users & progress:** `Users` lists/creates users (and shows the `✓ DB`/`✗ DB` health badge). `UserDetail` is the hub — an ordered **plan sequence** timeline, a **"Create next plan"** action (templates from the latest plan, dates continuing on, sets `previous_plan_id`), and a **Progress** tab with weight/calorie/macro/check-in charts (`components/LineChart.tsx` + `MacroRing.tsx`) fed by `GET /users/:id/progress`.
 
-**DB status indicator**: `Dashboard` calls `checkHealth()` on mount and renders a small `✓ DB` / `✗ DB` badge so connection issues are immediately visible.
+**Create/Edit flow** (`client/src/pages/CreatePlan.tsx`): a 3-step wizard — Step 1 `BiomarkerForm` + a **Plan schedule** card (start/end dates, status), Step 2 `MacroSetup`, Step 3 `MealBuilder`. Reads `location.state` for `{ editId?, profile?, plans?, userId?, previousPlanId?, status? }` to support edit, duplicate, blank-new (for a user), and templated next-plan. Exports/imports in-progress state as JSON.
+
+**Check-ins** (`components/CheckInPanel.tsx`, shown on `ViewPlan`): log weight + the four 1–5 ratings + notes; lists history with delete.
+
+**Key design detail — `base_` vs effective macros:** `MealItem` stores both `base_*` (per 1 serving) and effective `calories/protein/carbs/fat` (after `multiplier`). `MealBuilder` writes base values and recomputes effective via `applyMultiplier`. The `foods` collection only stores base values.
+
+**PDF export** (`client/src/pdf.ts`): jsPDF multi-page PDF — page 1 biometrics + macro overview, then per-plan food tables.
 
 ### Docker
 
@@ -79,4 +91,12 @@ Two compose files:
 
 ### Data migration
 
-`scripts/migrate-to-mongo.js` is a one-time script for migrating an existing SQLite `data.db` to MongoDB. Install deps with `npm install better-sqlite3 mongoose --no-save`, run with `MONGODB_URI=... node scripts/migrate-to-mongo.js`, then uninstall. Safe to inspect but should only be run once per target MongoDB instance.
+`scripts/migrate-add-users.py` (Python + `pymongo`) is a one-time, idempotent migration that
+introduces the Users feature onto pre-existing data: it creates a default user **"Me"**, attaches
+orphan `profiles` to it (backfilling `start_date`, `status`, and per-user `sequence`), and backfills
+`user_id` on any `checkins`. Run once per target MongoDB instance:
+
+```bash
+pip install pymongo
+MONGODB_URI="mongodb://localhost:27017/meal-prep" python scripts/migrate-add-users.py
+```

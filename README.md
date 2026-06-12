@@ -1,16 +1,28 @@
-# Meal Prep Calculator
+# MacroLeaf
 
-A full-stack web app for building personalized weekly meal plans based on biometrics, activity level, and fitness goals. The app calculates your TDEE, sets macro targets, and lets you compose meals from a reusable food database — with separate plans for workout and non-workout days.
+*Fuel, balanced.*
+
+A personal full-stack web app for building meal plans and tracking nutrition progress over time.
+Each **user** owns an ordered **sequence** of meal plans; the app calculates TDEE, sets macro
+targets, composes meals from a reusable food database (separate workout / non-workout days), and
+tracks **weight, calories, macros, and end-of-plan check-ins** on a progress dashboard.
+
+> Personal, local-use app (typically self-hosted on a NAS). **No authentication** by design — see
+> `FEATURE_PLAN.md`. Design/brand notes live in `REDESIGN.md`.
 
 ## Features
 
-- **Biomarker-driven setup** — enter age, gender, weight, height, and activity level to auto-calculate TDEE using the Mifflin-St Jeor equation
-- **Goal-based macros** — supports maintain, build muscle, and lose weight goals; adjusts protein recommendations accordingly
-- **Dual-day planning** — creates distinct meal plans for workout days (+10% calories) and non-workout days
-- **Meal builder** — add foods across labeled meals (Breakfast, Lunch, Dinner, Snacks) with per-serving multipliers
-- **Food database** — persist and reuse foods with autocomplete search; sync new entries via the API
-- **Real-time budget tracking** — visual macro progress bars showing calories, protein, carbs, and fat remaining
-- **PDF export** — download a formatted meal plan PDF with biometrics, TDEE summary, macro targets, and itemized meal tables
+- **Users** — each person owns their own plans, check-ins, and progress; full CRUD
+- **Plan sequences** — a user's plans form an ordered chain; **"Create next plan"** templates from the previous one with dates continuing on
+- **Scheduled plans** — start/end dates + status (`planned`/`active`/`completed`/`archived`)
+- **Biomarker-driven setup** — age, gender, weight, height, activity → TDEE (Mifflin-St Jeor)
+- **Goal-based macros** — maintain / build muscle / lose weight, with protein recommendations
+- **Dual-day planning** — distinct workout (+10% calories) and non-workout day plans
+- **Meal builder** — foods across labeled meals with per-serving multipliers and substitutes
+- **Food database** — persist/reuse foods with autocomplete search
+- **End-of-plan check-ins** — log weight + energy/adherence/hunger/progress (1–5) + notes
+- **Progress dashboard** — weight, calorie & macro targets, and check-in trends charted over time
+- **PDF export** — formatted plan PDF with biometrics, TDEE, macro targets, and meal tables
 
 ## Tech Stack
 
@@ -27,20 +39,23 @@ A full-stack web app for building personalized weekly meal plans based on biomet
 MealPrepCalculator/
 ├── client/              # React frontend (Vite)
 │   └── src/
-│       ├── pages/       # Dashboard, CreatePlan, ViewPlan, FoodDatabase
-│       ├── components/  # BiomarkerForm, MacroSetup, MealBuilder, BudgetBar
+│       ├── pages/       # Users, UserDetail, CreatePlan, ViewPlan, FoodDatabase
+│       ├── components/  # ui, icons, SplashScreen, BiomarkerForm, MacroSetup,
+│       │                #   MealBuilder, BudgetBar, MacroRing, LineChart, CheckInPanel
 │       ├── api.ts       # REST client
 │       ├── pdf.ts       # PDF export logic
 │       └── types.ts     # Shared types + TDEE/macro calculations
 ├── server/              # Express backend
 │   └── src/
 │       ├── index.ts     # Server entry point
-│       ├── routes.ts    # REST API routes
+│       ├── routes.ts    # REST API routes (users, plans, check-ins, progress, foods)
 │       └── db.ts        # Mongoose models + connection
 ├── scripts/
-│   ├── build-and-push.sh   # Multi-arch Docker build + push to private registry
-│   ├── buildkitd.toml      # buildx config for insecure private registry
-│   └── migrate-to-mongo.js # One-time SQLite → MongoDB migration
+│   ├── build-and-push.sh     # Multi-arch Docker build + push to private registry
+│   ├── buildkitd.toml        # buildx config for insecure private registry
+│   └── migrate-add-users.py  # One-time migration: introduce Users + plan sequencing
+├── REDESIGN.md              # Brand/visual design system (MacroLeaf)
+├── FEATURE_PLAN.md          # Users/sequences/check-ins/progress design + ERD + security
 ├── docker-compose.yml       # Local dev (builds from source + bundled MongoDB)
 ├── docker-compose.nas.yml   # NAS deployment (pulls pre-built image, arm64)
 └── VERSION                  # Semver used to tag Docker images
@@ -122,34 +137,49 @@ The NAS compose file pulls `linux/arm64` from the private registry and joins the
 
 ## API Overview
 
-| Method | Endpoint               | Description                         |
-|--------|------------------------|-------------------------------------|
-| GET    | `/api/health`          | DB connection status (`ok`/`error`) |
-| GET    | `/api/plans`           | List all profiles with plan counts  |
-| GET    | `/api/plans/:id`       | Get full profile + meal plans       |
-| POST   | `/api/plans`           | Create profile + plans + items      |
-| PUT    | `/api/plans/:id`       | Update profile + replace plans      |
-| DELETE | `/api/plans/:id`       | Delete profile and its plans        |
-| GET    | `/api/foods`           | List all foods                      |
-| GET    | `/api/foods/search?q=` | Search foods by name                |
-| POST   | `/api/foods/sync`      | Bulk upsert foods into the database |
+| Method | Endpoint                     | Description                                   |
+|--------|------------------------------|-----------------------------------------------|
+| GET    | `/api/health`                | DB connection status (`ok`/`error`)           |
+| GET    | `/api/users`                 | List users with plan counts                   |
+| POST   | `/api/users`                 | Create a user                                 |
+| GET    | `/api/users/:id`             | User + their plans (ordered by sequence)      |
+| PUT    | `/api/users/:id`             | Update a user                                 |
+| DELETE | `/api/users/:id`             | Delete a user (cascades plans + check-ins)    |
+| GET    | `/api/users/:id/progress`    | Aggregated progress (weight/macros/check-ins) |
+| GET    | `/api/plans`                 | List all profiles with plan counts            |
+| GET    | `/api/plans/:id`             | Get profile + day plans + check-ins           |
+| POST   | `/api/plans`                 | Create profile + plans + items                |
+| PUT    | `/api/plans/:id`             | Update profile + replace day plans            |
+| DELETE | `/api/plans/:id`             | Delete profile, its day plans + check-ins     |
+| GET    | `/api/plans/:id/checkins`    | List check-ins for a plan                     |
+| POST   | `/api/plans/:id/checkins`    | Create a check-in                             |
+| PUT    | `/api/checkins/:id`          | Update a check-in                             |
+| DELETE | `/api/checkins/:id`          | Delete a check-in                             |
+| GET    | `/api/foods`                 | List all foods                                |
+| GET    | `/api/foods/search?q=`       | Search foods by name                          |
+| POST   | `/api/foods/sync`            | Bulk upsert foods into the database           |
 
 ## Database
 
-MongoDB with three collections:
+MongoDB collections:
 
-- **profiles** — user biometrics and fitness goal
-- **mealplans** — workout/non-workout day plans linked to a profile, with meal items embedded as an array
+- **users** — a person who owns meal plans (`name`, `notes`). Organizational only, not an auth boundary
+- **profiles** — a *meal plan*: biometrics, goal, TDEE, plus `user_id`, `start_date`, `end_date`, `status`, `sequence`, `previous_plan_id`
+- **mealplans** — workout/non-workout *day plans* linked to a profile, meal items embedded as an array
+- **checkins** — end-of-plan / interim progress entries (weight + 1–5 ratings + notes)
 - **foods** — reusable food library with per-serving macro data
 
-### Migrating from SQLite
+See `FEATURE_PLAN.md` for the full data model and ERD.
 
-If you have an existing `data.db`, use the migration script to move data into MongoDB:
+### Migration: introducing Users
+
+When upgrading existing data to the Users feature, run the one-time, idempotent migration. It
+creates a default user **"Me"**, attaches existing plans to it (backfilling `start_date`, `status`,
+and per-user `sequence`), and backfills `user_id` on any check-ins:
 
 ```bash
-npm install better-sqlite3 mongoose --no-save
-MONGODB_URI=mongodb://localhost:27017/meal-prep node scripts/migrate-to-mongo.js
-npm uninstall better-sqlite3 mongoose
+pip install pymongo
+MONGODB_URI=mongodb://localhost:27017/meal-prep python scripts/migrate-add-users.py
 ```
 
 Only run this once per target MongoDB instance.

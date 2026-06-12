@@ -1,3 +1,7 @@
+export type PlanStatus = 'planned' | 'active' | 'completed' | 'archived';
+
+export const PLAN_STATUSES: PlanStatus[] = ['planned', 'active', 'completed', 'archived'];
+
 export interface Profile {
   id?: string;
   name: string;
@@ -9,9 +13,102 @@ export interface Profile {
   goal: 'maintain' | 'build_muscle' | 'lose_weight';
   tdee: number;
   calorie_deficit?: number;
+  user_id?: string;
+  start_date?: string;
+  end_date?: string;
+  status?: PlanStatus;
+  sequence?: number;
+  previous_plan_id?: string;
   created_at?: string;
+  updated_at?: string;
   plan_count?: number;
 }
+
+export interface User {
+  id?: string;
+  name: string;
+  notes?: string;
+  has_pin?: boolean;
+  created_at?: string;
+  updated_at?: string;
+  plan_count?: number;
+}
+
+export interface CheckIn {
+  id?: string;
+  user_id?: string;
+  profile_id?: string;
+  date: string;
+  weight_kg?: number;
+  energy?: number;
+  adherence?: number;
+  hunger?: number;
+  progress_rating?: number;
+  notes?: string;
+  photo?: string; // legacy single photo
+  photos?: { front?: string; back?: string; side?: string };
+  created_at?: string;
+}
+
+export type PhotoAngle = 'front' | 'back' | 'side';
+
+export interface ProgressPhoto {
+  id: string;
+  date: string;
+  plan_id: string | null;
+  front: string | null;
+  back: string | null;
+  side: string | null;
+}
+
+export interface MacroTargets {
+  calories: number | null;
+  protein: number | null;
+  carbs: number | null;
+  fat: number | null;
+}
+
+export interface ProgressData {
+  user: { id: string; name: string };
+  plans: Array<{
+    id: string;
+    name: string;
+    goal: string;
+    status: PlanStatus;
+    sequence: number;
+    start_date: string | null;
+    end_date: string | null;
+    starting_weight_kg: number | null;
+    targets: { non_workout: MacroTargets | null; workout: MacroTargets | null };
+  }>;
+  weight_series: Array<{ date: string; weight_kg: number; source: 'plan_start' | 'checkin'; plan_id: string | null }>;
+  macro_series: Array<{ plan_id: string; sequence: number; start_date: string | null; end_date: string | null; calories: number | null; protein: number | null; carbs: number | null; fat: number | null }>;
+  checkin_series: Array<{ date: string; plan_id: string | null; weight_kg: number | null; energy: number | null; adherence: number | null; hunger: number | null; progress_rating: number | null }>;
+  summary: {
+    plan_count: number;
+    checkin_count: number;
+    first_date: string | null;
+    last_date: string | null;
+    starting_weight_kg: number | null;
+    latest_weight_kg: number | null;
+    weight_change_kg: number | null;
+  };
+}
+
+// The check-in questions (single source of truth for the UI).
+export const CHECKIN_QUESTIONS: Array<{ key: keyof CheckIn; label: string; help: string }> = [
+  { key: 'energy', label: 'Energy level', help: 'How were your energy levels?' },
+  { key: 'adherence', label: 'Diet adherence', help: 'How closely did you follow the plan?' },
+  { key: 'hunger', label: 'Hunger / cravings', help: 'How manageable was hunger?' },
+  { key: 'progress_rating', label: 'Progress satisfaction', help: 'Happy with your results this plan?' },
+];
+
+export const STATUS_LABELS: Record<PlanStatus, string> = {
+  planned: 'Planned',
+  active: 'Active',
+  completed: 'Completed',
+  archived: 'Archived',
+};
 
 export interface MealSubstitute {
   food_name: string;
