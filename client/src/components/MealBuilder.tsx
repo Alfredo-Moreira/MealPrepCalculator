@@ -48,6 +48,55 @@ function NumericInput({
   );
 }
 
+// Editable serving size for a food chosen from the library. The food defines a base serving
+// (e.g. "100g"); typing a new amount (e.g. "50") rescales the multiplier accordingly (0.5).
+// Falls back to editing the raw serving text when the base serving has no leading number.
+function ServingInput({
+  baseServing, multiplier, onChangeMultiplier, onChangeText, className,
+}: {
+  baseServing: string;
+  multiplier: number;
+  onChangeMultiplier: (m: number) => void;
+  onChangeText: (v: string) => void;
+  className?: string;
+}) {
+  const match = baseServing.match(/^([\d.]+)\s*(.*)$/);
+  const baseAmount = match ? parseFloat(match[1]) : null;
+  const unit = match ? match[2] : '';
+
+  const current = baseAmount != null ? `${Math.round(baseAmount * multiplier * 10) / 10}${unit}` : baseServing;
+  const [raw, setRaw] = useState(current);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    // Sync display to the derived current serving only while not focused, to avoid clobbering typing.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (document.activeElement !== inputRef.current) setRaw(current);
+  }, [current]);
+
+  return (
+    <input
+      ref={inputRef}
+      type="text"
+      placeholder="Serving size (e.g. 100g)"
+      value={raw}
+      onChange={(e) => {
+        setRaw(e.target.value);
+        if (baseAmount != null && baseAmount > 0) {
+          const m = e.target.value.match(/^([\d.]+)/);
+          const amount = m ? parseFloat(m[1]) : NaN;
+          if (!isNaN(amount)) onChangeMultiplier(amount / baseAmount);
+        } else {
+          // Non-numeric base serving — just edit the text directly.
+          onChangeText(e.target.value);
+        }
+      }}
+      onBlur={() => setRaw(current)}
+      className={className}
+    />
+  );
+}
+
 function FoodNameInput({
   value, onChange, onSelect,
 }: {
@@ -176,6 +225,7 @@ export default function MealBuilder({ plan, onChange }: Props) {
         base_protein: f.base_protein,
         base_carbs: f.base_carbs,
         base_fat: f.base_fat,
+        from_db: true,
       },
       1
     );
@@ -191,6 +241,8 @@ export default function MealBuilder({ plan, onChange }: Props) {
   const updateItemBase = (globalIndex: number, field: string, value: string | number) => {
     const items = [...plan.items];
     const item = { ...items[globalIndex], [field]: value };
+    // Typing over a chosen food's name turns it back into a custom (editable) item.
+    if (field === 'food_name') item.from_db = false;
     if (field.startsWith('base_')) {
       items[globalIndex] = applyMultiplier(item, item.multiplier);
     } else {
@@ -211,14 +263,19 @@ export default function MealBuilder({ plan, onChange }: Props) {
         base_protein: entry.base_protein,
         base_carbs: entry.base_carbs,
         base_fat: entry.base_fat,
+        from_db: true,
       },
       current.multiplier
     );
     onChange({ ...plan, items });
   };
 
-  const updateMultiplier = (globalIndex: number, multiplier: number) => {
-    const clamped = Math.max(0.1, Math.round(multiplier * 10) / 10);
+  // `precise` is used when the serving-size input drives the multiplier: the typed serving is the
+  // source of truth, so we keep full precision (instead of snapping to 0.1) to avoid rewriting it.
+  const updateMultiplier = (globalIndex: number, multiplier: number, precise = false) => {
+    const clamped = precise
+      ? Math.max(0.0001, Math.round(multiplier * 1e6) / 1e6)
+      : Math.max(0.1, Math.round(multiplier * 10) / 10);
     const items = [...plan.items];
     items[globalIndex] = applyMultiplier(items[globalIndex], clamped);
     onChange({ ...plan, items });
@@ -390,6 +447,10 @@ export default function MealBuilder({ plan, onChange }: Props) {
               <div className="mb-3 space-y-3">
                 {mealItems.map(({ item, globalIndex }) => {
                   const complete = isItemComplete(item);
+                  // Lock macros when the food came from the library. Legacy items predate the
+                  // `from_db` flag, so fall back to "complete" — an already-filled item is treated
+                  // as a chosen food (backwards compatible, no need to re-create the entry).
+                  const locked = item.from_db ?? complete;
                   return (
                     <div key={globalIndex} className="rounded-lg border border-border bg-surface-sunken/50 p-3">
                       <div className="grid grid-cols-12 items-center gap-2">
@@ -398,13 +459,23 @@ export default function MealBuilder({ plan, onChange }: Props) {
                           onChange={(v) => updateItemBase(globalIndex, 'food_name', v)}
                           onSelect={(entry) => selectFoodFromDb(globalIndex, entry)}
                         />
-                        <input
-                          type="text"
-                          placeholder="Serving size (e.g. 100g)"
-                          value={item.serving_size}
-                          onChange={(e) => updateItemBase(globalIndex, 'serving_size', e.target.value)}
-                          className={`col-span-4 ${FIELD}`}
-                        />
+                        {locked ? (
+                          <ServingInput
+                            baseServing={item.serving_size}
+                            multiplier={item.multiplier}
+                            onChangeMultiplier={(m) => updateMultiplier(globalIndex, m, true)}
+                            onChangeText={(v) => updateItemBase(globalIndex, 'serving_size', v)}
+                            className={`col-span-4 ${FIELD}`}
+                          />
+                        ) : (
+                          <input
+                            type="text"
+                            placeholder="Serving size (e.g. 100g)"
+                            value={item.serving_size}
+                            onChange={(e) => updateItemBase(globalIndex, 'serving_size', e.target.value)}
+                            className={`col-span-4 ${FIELD}`}
+                          />
+                        )}
                         <div className={`col-span-3 flex items-center gap-1 ${!complete ? 'pointer-events-none opacity-40' : ''}`}>
                           <button
                             onClick={() => updateMultiplier(globalIndex, item.multiplier - 0.1)}
@@ -415,7 +486,7 @@ export default function MealBuilder({ plan, onChange }: Props) {
                           </button>
                           <input
                             type="number" step="0.1" min="0.1"
-                            value={item.multiplier}
+                            value={Math.round(item.multiplier * 100) / 100}
                             onChange={(e) => updateMultiplier(globalIndex, Number(e.target.value))}
                             disabled={!complete}
                             className="w-12 rounded border border-border px-1 py-1 text-center text-xs text-ink outline-none focus:border-brand focus:ring-1 focus:ring-brand/40"
@@ -438,26 +509,33 @@ export default function MealBuilder({ plan, onChange }: Props) {
                         </button>
                       </div>
 
-                      <div className="mt-2 grid grid-cols-4 gap-2">
-                        <div>
-                          <label className="mb-0.5 block text-[10px] text-faint">Cal / serving</label>
-                          <NumericInput placeholder="Cal" value={item.base_calories} onChange={(v) => updateItemBase(globalIndex, 'base_calories', v)} className={FIELD} />
+                      {locked ? (
+                        <div className="mt-2 text-xs text-faint">
+                          {item.calories} kcal · <span className="text-protein">P {item.protein}g</span> ·{' '}
+                          <span className="text-carbs">C {item.carbs}g</span> · <span className="text-fat">F {item.fat}g</span>
                         </div>
-                        <div>
-                          <label className="mb-0.5 block text-[10px] text-faint">Protein (g)</label>
-                          <NumericInput placeholder="P" value={item.base_protein} onChange={(v) => updateItemBase(globalIndex, 'base_protein', v)} className={FIELD} />
+                      ) : (
+                        <div className="mt-2 grid grid-cols-4 gap-2">
+                          <div>
+                            <label className="mb-0.5 block text-[10px] text-faint">Cal / serving</label>
+                            <NumericInput placeholder="Cal" value={item.base_calories} onChange={(v) => updateItemBase(globalIndex, 'base_calories', v)} className={FIELD} />
+                          </div>
+                          <div>
+                            <label className="mb-0.5 block text-[10px] text-faint">Protein (g)</label>
+                            <NumericInput placeholder="P" value={item.base_protein} onChange={(v) => updateItemBase(globalIndex, 'base_protein', v)} className={FIELD} />
+                          </div>
+                          <div>
+                            <label className="mb-0.5 block text-[10px] text-faint">Carbs (g)</label>
+                            <NumericInput placeholder="C" value={item.base_carbs} onChange={(v) => updateItemBase(globalIndex, 'base_carbs', v)} className={FIELD} />
+                          </div>
+                          <div>
+                            <label className="mb-0.5 block text-[10px] text-faint">Fat (g)</label>
+                            <NumericInput placeholder="F" value={item.base_fat} onChange={(v) => updateItemBase(globalIndex, 'base_fat', v)} className={FIELD} />
+                          </div>
                         </div>
-                        <div>
-                          <label className="mb-0.5 block text-[10px] text-faint">Carbs (g)</label>
-                          <NumericInput placeholder="C" value={item.base_carbs} onChange={(v) => updateItemBase(globalIndex, 'base_carbs', v)} className={FIELD} />
-                        </div>
-                        <div>
-                          <label className="mb-0.5 block text-[10px] text-faint">Fat (g)</label>
-                          <NumericInput placeholder="F" value={item.base_fat} onChange={(v) => updateItemBase(globalIndex, 'base_fat', v)} className={FIELD} />
-                        </div>
-                      </div>
+                      )}
 
-                      {complete && item.multiplier !== 1 && (() => {
+                      {!locked && complete && item.multiplier !== 1 && (() => {
                         const match = item.serving_size.match(/^([\d.]+)\s*(.*)$/);
                         const totalServing = match ? `${Math.round(parseFloat(match[1]) * item.multiplier * 10) / 10}${match[2]}` : null;
                         return (

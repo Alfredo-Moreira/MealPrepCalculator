@@ -149,6 +149,8 @@ export interface MealItem {
   protein: number;
   carbs: number;
   fat: number;
+  /** True when the food was chosen from the food library (autocomplete/scan), so its per-serving macros are locked and only the serving multiplier is editable. */
+  from_db?: boolean;
   substitutes?: MealSubstitute[];
 }
 

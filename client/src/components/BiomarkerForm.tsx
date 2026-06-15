@@ -7,18 +7,22 @@ interface Props {
   profile: Profile;
   onChange: (p: Profile) => void;
   onNext: () => void;
+  /** Extra gate from the parent (e.g. required plan dates). Blocks Next when false. */
+  canContinue?: boolean;
+  /** Hint shown when Next is blocked by the parent gate. */
+  blockedHint?: string;
 }
 
 const FIELD =
   'w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-ink outline-none transition-colors focus:border-brand focus:ring-2 focus:ring-brand/30';
 const LABEL = 'mb-1 block text-sm font-medium text-muted';
 
-export default function BiomarkerForm({ profile, onChange, onNext }: Props) {
+export default function BiomarkerForm({ profile, onChange, onNext, canContinue = true, blockedHint }: Props) {
   const update = (field: string, value: string | number) => {
     onChange({ ...profile, [field]: value });
   };
 
-  const canProceed = profile.name.trim() && profile.tdee > 0;
+  const canProceed = !!profile.name.trim() && profile.tdee > 0 && canContinue;
 
   return (
     <Card className="mx-auto max-w-lg p-6">
@@ -104,7 +108,10 @@ export default function BiomarkerForm({ profile, onChange, onNext }: Props) {
         </div>
       </div>
 
-      <Button onClick={onNext} disabled={!canProceed} className="mt-6 w-full">
+      {!canProceed && blockedHint && (
+        <p className="mt-4 text-center text-xs text-danger">{blockedHint}</p>
+      )}
+      <Button onClick={onNext} disabled={!canProceed} className="mt-3 w-full">
         Next: Set Macro Targets
         <ArrowRightIcon className="h-4 w-4" />
       </Button>

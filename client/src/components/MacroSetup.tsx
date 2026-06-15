@@ -51,6 +51,20 @@ function getPct(grams: number, kcalPerGram: number, totalCal: number): number {
   return Math.round((grams * kcalPerGram / totalCal) * 100);
 }
 
+// Reconstruct which preset (if any) a plan's macro split corresponds to, so the highlight
+// reflects saved data when editing instead of defaulting to a fixed preset. ±1% tolerance
+// absorbs the gram rounding done when a preset / deficit is applied.
+function detectPreset(plan: MealPlan): string | null {
+  if (plan.calorie_target <= 0) return null;
+  const p = getPct(plan.protein_target, 4, plan.calorie_target);
+  const c = getPct(plan.carbs_target, 4, plan.calorie_target);
+  const f = getPct(plan.fat_target, 9, plan.calorie_target);
+  const match = PRESET_SPLITS.find(
+    (s) => Math.abs(s.protein - p) <= 1 && Math.abs(s.carbs - c) <= 1 && Math.abs(s.fat - f) <= 1
+  );
+  return match ? match.label : null;
+}
+
 function getTotalPct(plan: MealPlan): number {
   if (plan.calorie_target <= 0) return 0;
   return (
@@ -135,7 +149,9 @@ function MacroEditor({ label, plan, onChange }: { label: string; plan: MealPlan;
 
 export default function MacroSetup({ tdee, profile, nonWorkoutPlan, workoutPlan, onNonWorkoutChange, onWorkoutChange, onDeficitChange, onBack, onNext }: Props) {
   const proteinRec = recommendedProtein(profile.weight_kg, profile.goal);
-  const [activePreset, setActivePreset] = useState<string | null>('Balanced');
+  // Derive the highlighted preset from the (possibly saved) macro split rather than a fixed
+  // default, so editing an existing plan re-selects the preset it was built with.
+  const [activePreset, setActivePreset] = useState<string | null>(() => detectPreset(nonWorkoutPlan));
   const [deficit, setDeficit] = useState(profile.calorie_deficit ?? 0);
 
   const netCalories = Math.max(0, tdee - deficit);
@@ -170,8 +186,8 @@ export default function MacroSetup({ tdee, profile, nonWorkoutPlan, workoutPlan,
     onWorkoutChange(applyPreset(workoutPlan, split));
   };
 
-  const handleNonWorkoutChange = (p: MealPlan) => { setActivePreset(null); onNonWorkoutChange(p); };
-  const handleWorkoutChange = (p: MealPlan) => { setActivePreset(null); onWorkoutChange(p); };
+  const handleNonWorkoutChange = (p: MealPlan) => { setActivePreset(detectPreset(p)); onNonWorkoutChange(p); };
+  const handleWorkoutChange = (p: MealPlan) => { setActivePreset(detectPreset(p)); onWorkoutChange(p); };
 
   const nwValid = getTotalPct(nonWorkoutPlan) === 100;
   const wValid = getTotalPct(workoutPlan) === 100;

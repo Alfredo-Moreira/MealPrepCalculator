@@ -103,29 +103,42 @@ export default function CreatePlan() {
     e.target.value = '';
   };
 
+  // Rescale a plan to a new calorie target while preserving its existing macro split, so a
+  // biometric edit keeps the user's chosen preset/ratios instead of resetting to a default.
+  // Falls back to the default split when the plan has no prior calories to derive ratios from.
+  const retargetPlan = (plan: MealPlan, newCal: number): MealPlan => {
+    const oldCal = plan.calorie_target;
+    if (oldCal > 0) {
+      const factor = newCal / oldCal;
+      return {
+        ...plan,
+        calorie_target: newCal,
+        protein_target: Math.round(plan.protein_target * factor),
+        carbs_target: Math.round(plan.carbs_target * factor),
+        fat_target: Math.round(plan.fat_target * factor),
+      };
+    }
+    const macros = macrosFromCalories(newCal);
+    return { ...plan, calorie_target: newCal, protein_target: macros.protein, carbs_target: macros.carbs, fat_target: macros.fat };
+  };
+
   const handleProfileChange = (updated: Profile) => {
     const tdee = calculateTDEE(updated);
-    const withTdee = { ...updated, tdee };
-    setProfile(withTdee);
-    // Update plan targets based on new TDEE
-    const nwMacros = macrosFromCalories(tdee);
-    setNonWorkoutPlan((p) => ({
-      ...p,
-      calorie_target: tdee,
-      protein_target: nwMacros.protein,
-      carbs_target: nwMacros.carbs,
-      fat_target: nwMacros.fat,
-    }));
-    const wCal = Math.round(tdee * 1.1);
-    const wMacros = macrosFromCalories(wCal);
-    setWorkoutPlan((p) => ({
-      ...p,
-      calorie_target: wCal,
-      protein_target: wMacros.protein,
-      carbs_target: wMacros.carbs,
-      fat_target: wMacros.fat,
-    }));
+    setProfile({ ...updated, tdee });
+    // Re-apply the existing deficit to the recomputed TDEE so it isn't discarded on a biometric edit.
+    const deficit = updated.calorie_deficit ?? 0;
+    const nwCal = Math.max(0, tdee - deficit);
+    const wCal = Math.round(nwCal * 1.1);
+    setNonWorkoutPlan((p) => retargetPlan(p, nwCal));
+    setWorkoutPlan((p) => retargetPlan(p, wCal));
   };
+
+  // Plan dates are required; the end date must not precede the start date.
+  // Normalize to YYYY-MM-DD so templated full-ISO values compare correctly.
+  const datesValid =
+    !!profile.start_date &&
+    !!profile.end_date &&
+    dateInput(profile.end_date) >= dateInput(profile.start_date);
 
   const handleSave = async () => {
     setSaving(true);
@@ -216,21 +229,30 @@ export default function CreatePlan() {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="mb-1 block text-sm font-medium text-muted">Start date</label>
+                <label className="mb-1 block text-sm font-medium text-muted">
+                  Start date <span className="text-danger">*</span>
+                </label>
                 <input
                   type="date"
+                  required
                   value={dateInput(profile.start_date)}
                   onChange={(e) => setProfile((p) => ({ ...p, start_date: e.target.value }))}
-                  className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/30"
+                  aria-invalid={!profile.start_date}
+                  className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/30 aria-invalid:border-danger"
                 />
               </div>
               <div>
-                <label className="mb-1 block text-sm font-medium text-muted">End date</label>
+                <label className="mb-1 block text-sm font-medium text-muted">
+                  End date <span className="text-danger">*</span>
+                </label>
                 <input
                   type="date"
+                  required
+                  min={dateInput(profile.start_date) || undefined}
                   value={dateInput(profile.end_date)}
                   onChange={(e) => setProfile((p) => ({ ...p, end_date: e.target.value }))}
-                  className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/30"
+                  aria-invalid={!profile.end_date}
+                  className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/30 aria-invalid:border-danger"
                 />
               </div>
             </div>
@@ -253,6 +275,12 @@ export default function CreatePlan() {
             profile={profile}
             onChange={handleProfileChange}
             onNext={() => setStep(2)}
+            canContinue={datesValid}
+            blockedHint={
+              !profile.start_date || !profile.end_date
+                ? 'Start and end dates are required.'
+                : 'End date must be on or after the start date.'
+            }
           />
         </div>
       )}
