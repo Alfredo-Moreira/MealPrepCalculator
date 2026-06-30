@@ -53,6 +53,9 @@ const PROFILE_FIELDS = [
 ];
 const CHECKIN_FIELDS = ['date', 'weight_kg', 'energy', 'adherence', 'hunger', 'progress_rating', 'notes', 'photo', 'photos'];
 
+/** Plan statuses excluded from the progress tracker — drafts (`planned`) and retired (`archived`) plans don't reflect real progress. ($nin also keeps legacy docs with no status set.) */
+const PROGRESS_EXCLUDED_STATUSES = ['planned', 'archived'];
+
 function normaliseItems(items: any[]) {
   return (items ?? []).map((item: any) => ({
     ...item,
@@ -248,7 +251,10 @@ planRoutes.get('/users/:id/progress', async (req, res) => {
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const profiles = await Profile.find({ user_id: user._id }).sort({ sequence: 1 });
+    const profiles = await Profile.find({
+      user_id: user._id,
+      status: { $nin: PROGRESS_EXCLUDED_STATUSES },
+    }).sort({ sequence: 1 });
     const profileIds = profiles.map((p) => p._id);
     const dayPlans = await MealPlan.find({ profile_id: { $in: profileIds } });
     const checkins = await CheckIn.find({ profile_id: { $in: profileIds } }).sort({ date: 1 });
