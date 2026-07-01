@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import type { MealPlan, Profile } from '../types';
-import { recommendedProtein, macrosFromDeficit } from '../types';
+import { recommendedProtein } from '../types';
+import { Card, Button } from './ui';
+import { ChevronLeftIcon, ArrowRightIcon, ProteinIcon } from './icons';
 
 interface Props {
   tdee: number;
@@ -21,6 +23,9 @@ interface MacroSplit {
   carbs: number;
   fat: number;
 }
+
+const FIELD =
+  'w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-ink outline-none transition-colors focus:border-brand focus:ring-2 focus:ring-brand/30';
 
 const PRESET_SPLITS: MacroSplit[] = [
   { label: 'Balanced', description: '30 / 40 / 30', protein: 30, carbs: 40, fat: 30 },
@@ -46,6 +51,20 @@ function getPct(grams: number, kcalPerGram: number, totalCal: number): number {
   return Math.round((grams * kcalPerGram / totalCal) * 100);
 }
 
+// Reconstruct which preset (if any) a plan's macro split corresponds to, so the highlight
+// reflects saved data when editing instead of defaulting to a fixed preset. ±1% tolerance
+// absorbs the gram rounding done when a preset / deficit is applied.
+function detectPreset(plan: MealPlan): string | null {
+  if (plan.calorie_target <= 0) return null;
+  const p = getPct(plan.protein_target, 4, plan.calorie_target);
+  const c = getPct(plan.carbs_target, 4, plan.calorie_target);
+  const f = getPct(plan.fat_target, 9, plan.calorie_target);
+  const match = PRESET_SPLITS.find(
+    (s) => Math.abs(s.protein - p) <= 1 && Math.abs(s.carbs - c) <= 1 && Math.abs(s.fat - f) <= 1
+  );
+  return match ? match.label : null;
+}
+
 function getTotalPct(plan: MealPlan): number {
   if (plan.calorie_target <= 0) return 0;
   return (
@@ -55,15 +74,13 @@ function getTotalPct(plan: MealPlan): number {
   );
 }
 
-function MacroEditor({
-  label,
-  plan,
-  onChange,
-}: {
-  label: string;
-  plan: MealPlan;
-  onChange: (p: MealPlan) => void;
-}) {
+const MACRO_DOT: Record<'protein' | 'carbs' | 'fat', string> = {
+  protein: 'bg-protein',
+  carbs: 'bg-carbs',
+  fat: 'bg-fat',
+};
+
+function MacroEditor({ label, plan, onChange }: { label: string; plan: MealPlan; onChange: (p: MealPlan) => void }) {
   const cal = plan.calorie_target;
 
   const proteinPct = getPct(plan.protein_target, 4, cal);
@@ -72,9 +89,7 @@ function MacroEditor({
   const totalPct = proteinPct + carbsPct + fatPct;
   const isValid = totalPct === 100;
 
-  const actualCalories = Math.round(
-    plan.protein_target * 4 + plan.carbs_target * 4 + plan.fat_target * 9
-  );
+  const actualCalories = Math.round(plan.protein_target * 4 + plan.carbs_target * 4 + plan.fat_target * 9);
 
   const updateGrams = (field: 'protein_target' | 'carbs_target' | 'fat_target', grams: number) => {
     onChange({ ...plan, [field]: grams });
@@ -88,31 +103,20 @@ function MacroEditor({
   };
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-5">
-      <h3 className="font-semibold text-gray-800 mb-3">{label}</h3>
+    <Card className="p-5">
+      <h3 className="mb-3 font-semibold text-ink">{label}</h3>
 
-      {/* Calorie target */}
       <div className="mb-4">
-        <label className="block text-xs font-medium text-gray-500 mb-1">Calorie Target</label>
-        <div className="text-2xl font-bold text-gray-900">{cal} kcal</div>
-        {actualCalories !== cal && (
-          <span className="text-xs text-amber-600">
-            Actual from macros: {actualCalories} kcal
-          </span>
-        )}
+        <label className="mb-1 block text-xs font-medium text-faint">Calorie Target</label>
+        <div className="text-2xl font-bold text-ink">{cal} kcal</div>
+        {actualCalories !== cal && <span className="text-xs text-warning">Actual from macros: {actualCalories} kcal</span>}
       </div>
 
-      {/* Percentage total indicator */}
-      <div className={`text-xs font-medium mb-3 px-3 py-1.5 rounded-lg ${
-        isValid
-          ? 'bg-emerald-50 text-emerald-700'
-          : 'bg-red-50 text-red-600'
-      }`}>
+      <div className={`mb-3 rounded-lg px-3 py-1.5 text-xs font-medium ${isValid ? 'bg-brand-tint text-brand-strong' : 'bg-danger/10 text-danger'}`}>
         Total: {totalPct}%{' '}
         {!isValid && (totalPct > 100 ? `(${totalPct - 100}% over)` : `(${100 - totalPct}% remaining)`)}
       </div>
 
-      {/* Macro rows */}
       <div className="space-y-3">
         {([
           { label: 'Protein', macro: 'protein' as const, field: 'protein_target' as const, pct: proteinPct, kcalPer: 4 },
@@ -120,63 +124,60 @@ function MacroEditor({
           { label: 'Fat', macro: 'fat' as const, field: 'fat_target' as const, pct: fatPct, kcalPer: 9 },
         ]).map((m) => (
           <div key={m.macro}>
-            <label className="block text-xs font-medium text-gray-500 mb-1">{m.label}</label>
+            <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-faint">
+              <i className={`h-2 w-2 rounded-full ${MACRO_DOT[m.macro]}`} />
+              {m.label}
+            </label>
             <div className="flex items-center gap-2">
               <div className="flex-1">
-                <input
-                  type="number"
-                  value={plan[m.field]}
-                  onChange={(e) => updateGrams(m.field, Number(e.target.value))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
-                />
-                <span className="text-xs text-gray-400">{plan[m.field] * m.kcalPer} kcal</span>
+                <input type="number" value={plan[m.field]} onChange={(e) => updateGrams(m.field, Number(e.target.value))} className={FIELD} />
+                <span className="text-xs text-faint">{plan[m.field] * m.kcalPer} kcal</span>
               </div>
               <div className="w-20">
                 <div className="flex items-center">
-                  <input
-                    type="number"
-                    value={m.pct}
-                    onChange={(e) => updatePct(m.macro, Number(e.target.value))}
-                    className="w-full border border-gray-300 rounded-lg px-2 py-2 text-sm text-center focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
-                  />
-                  <span className="text-xs text-gray-500 ml-1">%</span>
+                  <input type="number" value={m.pct} onChange={(e) => updatePct(m.macro, Number(e.target.value))} className={`${FIELD} px-2 text-center`} />
+                  <span className="ml-1 text-xs text-muted">%</span>
                 </div>
               </div>
             </div>
           </div>
         ))}
       </div>
-    </div>
+    </Card>
   );
 }
 
 export default function MacroSetup({ tdee, profile, nonWorkoutPlan, workoutPlan, onNonWorkoutChange, onWorkoutChange, onDeficitChange, onBack, onNext }: Props) {
   const proteinRec = recommendedProtein(profile.weight_kg, profile.goal);
-  const [activePreset, setActivePreset] = useState<string | null>('Balanced');
+  // Derive the highlighted preset from the (possibly saved) macro split rather than a fixed
+  // default, so editing an existing plan re-selects the preset it was built with.
+  const [activePreset, setActivePreset] = useState<string | null>(() => detectPreset(nonWorkoutPlan));
   const [deficit, setDeficit] = useState(profile.calorie_deficit ?? 0);
 
   const netCalories = Math.max(0, tdee - deficit);
   const workoutNetCalories = Math.round(netCalories * 1.1);
 
-  const handleApplyDeficit = () => {
-    const nwMacros = macrosFromDeficit(netCalories, profile.weight_kg, profile.goal);
-    const wMacros = macrosFromDeficit(workoutNetCalories, profile.weight_kg, profile.goal);
-    onNonWorkoutChange({
-      ...nonWorkoutPlan,
-      calorie_target: netCalories,
-      protein_target: nwMacros.protein,
-      carbs_target: nwMacros.carbs,
-      fat_target: nwMacros.fat,
-    });
-    onWorkoutChange({
-      ...workoutPlan,
-      calorie_target: workoutNetCalories,
-      protein_target: wMacros.protein,
-      carbs_target: wMacros.carbs,
-      fat_target: wMacros.fat,
-    });
-    onDeficitChange(deficit);
-    setActivePreset(null);
+  // Reactive deficit: scale each plan's calorie target to net, preserving the macro split.
+  const rescale = (plan: MealPlan, newCal: number): MealPlan => {
+    const oldCal = plan.calorie_target || newCal || 1;
+    const factor = oldCal > 0 ? newCal / oldCal : 1;
+    return {
+      ...plan,
+      calorie_target: newCal,
+      protein_target: Math.round(plan.protein_target * factor),
+      carbs_target: Math.round(plan.carbs_target * factor),
+      fat_target: Math.round(plan.fat_target * factor),
+    };
+  };
+
+  const changeDeficit = (raw: number) => {
+    const d = Math.max(0, Math.min(Math.round(raw) || 0, tdee));
+    setDeficit(d);
+    const nwNet = Math.max(0, tdee - d);
+    const wNet = Math.round(nwNet * 1.1);
+    onNonWorkoutChange(rescale(nonWorkoutPlan, nwNet));
+    onWorkoutChange(rescale(workoutPlan, wNet));
+    onDeficitChange(d);
   };
 
   const handlePreset = (split: MacroSplit) => {
@@ -185,110 +186,90 @@ export default function MacroSetup({ tdee, profile, nonWorkoutPlan, workoutPlan,
     onWorkoutChange(applyPreset(workoutPlan, split));
   };
 
-  const handleNonWorkoutChange = (p: MealPlan) => {
-    setActivePreset(null);
-    onNonWorkoutChange(p);
-  };
-
-  const handleWorkoutChange = (p: MealPlan) => {
-    setActivePreset(null);
-    onWorkoutChange(p);
-  };
+  const handleNonWorkoutChange = (p: MealPlan) => { setActivePreset(detectPreset(p)); onNonWorkoutChange(p); };
+  const handleWorkoutChange = (p: MealPlan) => { setActivePreset(detectPreset(p)); onWorkoutChange(p); };
 
   const nwValid = getTotalPct(nonWorkoutPlan) === 100;
   const wValid = getTotalPct(workoutPlan) === 100;
   const canProceed = nwValid && wValid;
 
   return (
-    <div className="max-w-2xl mx-auto">
-      <h2 className="text-xl font-semibold text-gray-800 mb-1">Macro Targets</h2>
-      <p className="text-sm text-gray-500 mb-6">
-        Based on your TDEE of <strong>{tdee} kcal</strong>. Pick a preset or fine-tune percentages and grams below.
+    <div className="mx-auto max-w-2xl">
+      <h2 className="mb-1 text-xl font-semibold tracking-tight text-ink">Macro Targets</h2>
+      <p className="mb-6 text-sm text-muted">
+        Based on your TDEE of <strong className="text-ink">{tdee} kcal</strong>. Pick a preset or fine-tune percentages and grams below.
       </p>
 
-      {/* Calorie Deficit */}
-      <div className="bg-white border border-gray-200 rounded-xl p-4 mb-6">
-        <h3 className="text-sm font-semibold text-gray-700 mb-3">Calorie Deficit</h3>
-        <div className="flex items-end gap-4 flex-wrap">
+      {/* Calorie deficit */}
+      <Card className="mb-6 p-4">
+        <h3 className="mb-3 text-sm font-semibold text-ink">Calorie Deficit</h3>
+        <div className="flex flex-wrap items-end gap-4">
           <div>
-            <label className="block text-xs text-gray-500 mb-1">TDEE</label>
-            <div className="text-lg font-bold text-gray-700">{tdee} kcal</div>
+            <label className="mb-1 block text-xs text-faint">TDEE</label>
+            <div className="text-lg font-bold text-muted">{tdee} kcal</div>
           </div>
-          <div className="text-gray-400 text-xl font-light self-end pb-0.5">−</div>
+          <div className="self-end pb-0.5 text-xl font-light text-faint">−</div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Daily deficit</label>
+            <label className="mb-1 block text-xs text-faint">Daily deficit</label>
             <div className="flex items-center gap-1">
               <input
-                type="number"
-                min={0}
-                max={tdee}
-                value={deficit}
-                onChange={(e) => setDeficit(Math.max(0, Number(e.target.value)))}
-                className="w-24 border border-gray-300 rounded-lg px-3 py-2 text-sm text-right focus:ring-2 focus:ring-emerald-500 outline-none"
+                type="number" min={0} max={tdee} value={deficit}
+                onChange={(e) => changeDeficit(Number(e.target.value))}
+                className={`${FIELD} w-24 text-right`}
               />
-              <span className="text-sm text-gray-500">kcal</span>
+              <span className="text-sm text-muted">kcal</span>
             </div>
           </div>
-          <div className="text-gray-400 text-xl font-light self-end pb-0.5">=</div>
+          <div className="self-end pb-0.5 text-xl font-light text-faint">=</div>
           <div className="flex gap-4">
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Non-workout day</label>
-              <div className={`text-lg font-bold ${deficit > 0 ? 'text-amber-600' : 'text-gray-700'}`}>
-                {netCalories} kcal
-              </div>
+              <label className="mb-1 block text-xs text-faint">Non-workout day</label>
+              <div className={`text-lg font-bold ${deficit > 0 ? 'text-warning' : 'text-muted'}`}>{netCalories} kcal</div>
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Workout day</label>
-              <div className={`text-lg font-bold ${deficit > 0 ? 'text-amber-600' : 'text-gray-700'}`}>
-                {workoutNetCalories} kcal
-              </div>
+              <label className="mb-1 block text-xs text-faint">Workout day</label>
+              <div className={`text-lg font-bold ${deficit > 0 ? 'text-warning' : 'text-muted'}`}>{workoutNetCalories} kcal</div>
             </div>
           </div>
-          <button
-            onClick={handleApplyDeficit}
-            className="ml-auto px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 transition-colors cursor-pointer self-end"
-          >
-            Apply to both plans
-          </button>
         </div>
         {deficit > 0 && (
-          <p className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-            Protein will be anchored to body weight ({proteinRec.min}–{proteinRec.max} g/day). Remaining calories are split 50/50 between carbs and fat.
+          <p className="mt-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-[#9a6b16]">
+            Targets update automatically as you change the deficit. The macro split is preserved; recommended protein is {proteinRec.min}–{proteinRec.max} g/day.
           </p>
         )}
-      </div>
+      </Card>
 
-      {/* Protein Recommendation */}
-      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
-        <h3 className="text-sm font-semibold text-blue-800 mb-1">Recommended Protein Intake</h3>
-        <p className="text-2xl font-bold text-blue-900">{proteinRec.min}–{proteinRec.max} g/day</p>
-        <p className="text-xs text-blue-600 mt-1">
+      {/* Protein recommendation */}
+      <Card className="mb-6 border-brand-soft bg-brand-tint p-4">
+        <h3 className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-brand-strong">
+          <ProteinIcon className="h-4 w-4" /> Recommended Protein Intake
+        </h3>
+        <p className="text-2xl font-bold text-brand-strong">{proteinRec.min}–{proteinRec.max} g/day</p>
+        <p className="mt-1 text-xs text-brand">
           {profile.goal === 'build_muscle'
             ? `Based on 1.6–2.2 g/kg for muscle building at ${profile.weight_kg} kg body weight.`
             : profile.goal === 'lose_weight'
             ? `Based on 1.2–1.5 g/kg for weight loss (preserving muscle) at ${profile.weight_kg} kg body weight.`
             : `Based on 0.8–1.0 g/kg for general maintenance at ${profile.weight_kg} kg body weight.`}
         </p>
-      </div>
+      </Card>
 
-      {/* Preset Splits */}
+      {/* Presets */}
       <div className="mb-6">
-        <h3 className="text-sm font-semibold text-gray-700 mb-2">Quick Presets</h3>
+        <h3 className="mb-2 text-sm font-semibold text-ink">Quick Presets</h3>
         <div className="grid grid-cols-3 gap-2">
           {PRESET_SPLITS.map((split) => (
             <button
               key={split.label}
               onClick={() => handlePreset(split)}
-              className={`text-left px-3 py-2.5 rounded-lg border text-sm transition-colors cursor-pointer ${
+              className={`cursor-pointer rounded-xl border px-3 py-2.5 text-left text-sm transition-colors ${
                 activePreset === split.label
-                  ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-500'
-                  : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
+                  ? 'border-brand bg-brand-tint ring-2 ring-brand'
+                  : 'border-border bg-surface hover:border-sage hover:bg-surface-sunken'
               }`}
             >
-              <span className={`font-medium block ${activePreset === split.label ? 'text-emerald-700' : 'text-gray-800'}`}>
-                {split.label}
-              </span>
-              <span className={`text-xs ${activePreset === split.label ? 'text-emerald-600' : 'text-gray-400'}`}>
+              <span className={`block font-medium ${activePreset === split.label ? 'text-brand-strong' : 'text-ink'}`}>{split.label}</span>
+              <span className={`text-xs ${activePreset === split.label ? 'text-brand' : 'text-faint'}`}>
                 P {split.protein} / C {split.carbs} / F {split.fat}
               </span>
             </button>
@@ -302,25 +283,18 @@ export default function MacroSetup({ tdee, profile, nonWorkoutPlan, workoutPlan,
       </div>
 
       {!canProceed && (
-        <p className="text-sm text-red-500 text-center mt-4">
+        <p className="mt-4 text-center text-sm text-danger">
           Macro percentages must add up to 100% for both day types before proceeding.
         </p>
       )}
 
-      <div className="flex justify-between mt-6">
-        <button
-          onClick={onBack}
-          className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
-        >
-          Back
-        </button>
-        <button
-          onClick={onNext}
-          disabled={!canProceed}
-          className="bg-emerald-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50 cursor-pointer"
-        >
-          Next: Build Meals
-        </button>
+      <div className="mt-6 flex justify-between">
+        <Button variant="ghost" onClick={onBack}>
+          <ChevronLeftIcon className="h-4 w-4" /> Back
+        </Button>
+        <Button onClick={onNext} disabled={!canProceed}>
+          Next: Build Meals <ArrowRightIcon className="h-4 w-4" />
+        </Button>
       </div>
     </div>
   );

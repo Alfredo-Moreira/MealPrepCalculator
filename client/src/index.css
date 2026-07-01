@@ -1,1 +1,86 @@
 @import "tailwindcss";
+@import "@fontsource-variable/manrope/index.css";
+
+/* ------------------------------------------------------------------ *
+ * Meal Prep Calculator — design tokens (calm-wellness brand)
+ * Derived from the brandkit identity board. Tailwind v4 generates
+ * utilities from these custom properties (bg-brand, text-muted, …).
+ * ------------------------------------------------------------------ */
+@theme {
+  /* surfaces */
+  --color-canvas: #f6f4ef;
+  --color-surface: #ffffff;
+  --color-surface-sunken: #efede6;
+  --color-border: #e4e1d8;
+
+  /* text */
+  --color-ink: #1f2a24;
+  --color-muted: #5e6b62;
+  --color-faint: #8a958c;
+
+  /* brand greens */
+  --color-brand: #2e7d5b;
+  --color-brand-strong: #1f5a41;
+  --color-brand-soft: #dcebe1;
+  --color-brand-tint: #eaf3ed;
+  --color-sage: #8fb89c;
+
+  /* macro accents (reused everywhere: budgets, rings, chips, tables) */
+  --color-protein: #2e7d5b;
+  --color-carbs: #e0a33c;
+  --color-fat: #5b7c8d;
+
+  /* states */
+  --color-success: #2e7d5b;
+  --color-warning: #e0a33c;
+  --color-danger: #c2493b;
+
+  /* type + radius */
+  --font-sans: "Manrope Variable", ui-sans-serif, system-ui, sans-serif;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+
+  /* one soft brand shadow */
+  --shadow-card: 0 1px 2px rgba(31, 42, 36, 0.04), 0 4px 16px rgba(31, 42, 36, 0.06);
+  --shadow-lift: 0 2px 6px rgba(31, 42, 36, 0.06), 0 12px 28px rgba(31, 42, 36, 0.1);
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  /* gentle default focus ring in brand color */
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Splash ring-draw (css-animations pattern) + shared keyframes.
+ * All gated behind prefers-reduced-motion.
+ * ------------------------------------------------------------------ */
+@media (prefers-reduced-motion: no-preference) {
+  .splash-ring {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    animation: draw-ring 0.7s ease-out 0.15s forwards;
+  }
+  @keyframes draw-ring {
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+  .ring-draw {
+    animation: draw-ring 0.8s ease-out forwards;
+  }
+}

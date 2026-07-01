@@ -1,80 +1,47 @@
 import { useState, useEffect, useRef } from 'react';
 import { fetchFoods, syncFoods, createFood, updateFood, deleteFood } from '../api';
 import type { FoodEntry } from '../api';
+import { Button, Card } from '../components/ui';
+import { SearchIcon, UploadIcon, DownloadIcon, PlusIcon, LeafIcon, BarcodeIcon } from '../components/icons';
+import { buildFoodsExport, normalizeFoodsImport, download } from '../lib/planIO';
+import FoodSearchModal from '../components/FoodSearchModal';
 
 type FoodForm = Omit<FoodEntry, 'id' | 'created_at'>;
 
+const FIELD =
+  'w-full rounded-lg border border-border bg-surface px-2 py-1 text-sm text-ink outline-none transition-colors focus:border-brand focus:ring-2 focus:ring-brand/30';
+
 const emptyForm = (): FoodForm => ({
-  food_name: '',
-  serving_size: '',
-  base_calories: 0,
-  base_protein: 0,
-  base_carbs: 0,
-  base_fat: 0,
+  food_name: '', serving_size: '', base_calories: 0, base_protein: 0, base_carbs: 0, base_fat: 0,
 });
 
 function FoodFormRow({
-  value,
-  onChange,
-  onSubmit,
-  onCancel,
-  submitLabel,
-  saving,
+  value, onChange, onSubmit, onCancel, submitLabel, saving,
 }: {
-  value: FoodForm;
-  onChange: (f: FoodForm) => void;
-  onSubmit: () => void;
-  onCancel: () => void;
-  submitLabel: string;
-  saving: boolean;
+  value: FoodForm; onChange: (f: FoodForm) => void; onSubmit: () => void; onCancel: () => void; submitLabel: string; saving: boolean;
 }) {
   const num = (field: keyof FoodForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
     onChange({ ...value, [field]: field === 'food_name' || field === 'serving_size' ? e.target.value : Number(e.target.value) });
 
   return (
-    <tr className="bg-emerald-50">
+    <tr className="bg-brand-tint">
       <td className="px-3 py-2">
-        <input
-          className="w-full border border-gray-300 rounded px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
-          placeholder="Food name *"
-          value={value.food_name}
-          onChange={num('food_name')}
-        />
+        <input className={FIELD} placeholder="Food name *" value={value.food_name} onChange={num('food_name')} />
       </td>
       <td className="px-3 py-2">
-        <input
-          className="w-full border border-gray-300 rounded px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
-          placeholder="e.g. 100g"
-          value={value.serving_size}
-          onChange={num('serving_size')}
-        />
+        <input className={FIELD} placeholder="e.g. 100g" value={value.serving_size} onChange={num('serving_size')} />
       </td>
       {(['base_calories', 'base_protein', 'base_carbs', 'base_fat'] as const).map((f) => (
         <td key={f} className="px-3 py-2">
-          <input
-            type="number"
-            min={0}
-            className="w-full border border-gray-300 rounded px-2 py-1 text-sm text-right outline-none focus:ring-2 focus:ring-emerald-500"
-            value={value[f]}
-            onChange={num(f)}
-          />
+          <input type="number" min={0} className={`${FIELD} text-right`} value={value[f]} onChange={num(f)} />
         </td>
       ))}
       <td className="px-3 py-2">
-        <div className="flex gap-1 justify-end">
-          <button
-            onClick={onSubmit}
-            disabled={saving || !value.food_name.trim()}
-            className="px-2 py-1 bg-emerald-600 text-white rounded text-xs hover:bg-emerald-700 disabled:opacity-50 cursor-pointer"
-          >
+        <div className="flex justify-end gap-1">
+          <Button size="sm" onClick={onSubmit} disabled={saving || !value.food_name.trim()}>
             {saving ? '…' : submitLabel}
-          </button>
-          <button
-            onClick={onCancel}
-            className="px-2 py-1 border border-gray-300 rounded text-xs text-gray-600 hover:bg-gray-100 cursor-pointer"
-          >
-            Cancel
-          </button>
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>
         </div>
       </td>
     </tr>
@@ -94,6 +61,7 @@ export default function FoodDatabase() {
   const [editForm, setEditForm] = useState<FoodForm>(emptyForm());
   const [editSaving, setEditSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [showSearch, setShowSearch] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadFoods = () => fetchFoods().then(setFoods).finally(() => setLoading(false));
@@ -109,14 +77,8 @@ export default function FoodDatabase() {
       setImporting(true);
       setImportStatus(null);
       try {
-        const raw = JSON.parse(ev.target?.result as string);
-        const items: unknown[] = Array.isArray(raw) ? raw : Array.isArray(raw?.items) ? raw.items : null;
-        if (!items) throw new Error('JSON must be an array or an object with an "items" array.');
-        const valid = items.filter((item): item is Parameters<typeof syncFoods>[0][number] => {
-          const i = item as Record<string, unknown>;
-          return typeof i.food_name === 'string' && typeof i.base_calories === 'number';
-        });
-        if (valid.length === 0) throw new Error('No valid food entries found. Each item needs at least "food_name" (string) and "base_calories" (number).');
+        const valid = normalizeFoodsImport(JSON.parse(ev.target?.result as string));
+        if (valid.length === 0) throw new Error('No valid food entries found. Each item needs at least "food_name" and a calorie value.');
         const { added } = await syncFoods(valid);
         setImportStatus({ type: 'success', message: `Imported ${added} new item${added !== 1 ? 's' : ''} (${valid.length} total in file).` });
         loadFoods();
@@ -181,80 +143,96 @@ export default function FoodDatabase() {
     }
   };
 
-  const filtered = foods.filter((f) =>
-    f.food_name.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = foods.filter((f) => f.food_name.toLowerCase().includes(search.toLowerCase()));
 
   return (
     <div>
       <input ref={fileInputRef} type="file" accept=".json" onChange={handleImport} className="hidden" />
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Food Database</h1>
+      <div className="mb-6 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-brand-tint text-brand">
+            <LeafIcon className="h-5 w-5" />
+          </span>
+          <h1 className="text-2xl font-bold tracking-tight text-ink">Food Database</h1>
+        </div>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-500">{foods.length} item{foods.length !== 1 ? 's' : ''}</span>
-          <button
-            onClick={() => {
-              const blob = new Blob([JSON.stringify(foods, null, 2)], { type: 'application/json' });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = `food-database-${new Date().toISOString().slice(0, 10)}.json`;
-              a.click();
-              URL.revokeObjectURL(url);
-            }}
+          <span className="text-sm text-muted">{foods.length} item{foods.length !== 1 ? 's' : ''}</span>
+          <Button
+            variant="ghost" size="sm"
+            onClick={() => download(`food-database-${new Date().toISOString().slice(0, 10)}.json`, buildFoodsExport(foods))}
             disabled={foods.length === 0}
-            className="px-3 py-1.5 border border-gray-300 rounded-lg text-xs text-gray-600 hover:bg-gray-100 transition-colors disabled:opacity-50 cursor-pointer"
           >
-            Export JSON
-          </button>
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={importing}
-            className="px-3 py-1.5 border border-gray-300 rounded-lg text-xs text-gray-600 hover:bg-gray-100 transition-colors disabled:opacity-50 cursor-pointer"
-          >
-            {importing ? 'Importing…' : 'Import JSON'}
-          </button>
-          <button
-            onClick={() => { setShowAddForm(true); setEditingId(null); }}
-            className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs hover:bg-emerald-700 transition-colors cursor-pointer"
-          >
-            + Add Food
-          </button>
+            <DownloadIcon className="h-3.5 w-3.5" /> Export JSON
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => fileInputRef.current?.click()} disabled={importing}>
+            <UploadIcon className="h-3.5 w-3.5" /> {importing ? 'Importing…' : 'Import JSON'}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setShowSearch(true)}>
+            <BarcodeIcon className="h-3.5 w-3.5" /> Find online
+          </Button>
+          <Button size="sm" onClick={() => { setShowAddForm(true); setEditingId(null); }}>
+            <PlusIcon className="h-3.5 w-3.5" /> Add Food
+          </Button>
         </div>
       </div>
 
+      {showSearch && (
+        <FoodSearchModal
+          onClose={() => setShowSearch(false)}
+          onPick={(f) => {
+            setAddForm({
+              food_name: f.food_name, serving_size: f.serving_size,
+              base_calories: f.base_calories, base_protein: f.base_protein,
+              base_carbs: f.base_carbs, base_fat: f.base_fat,
+            });
+            setShowAddForm(true);
+            setEditingId(null);
+            setShowSearch(false);
+          }}
+        />
+      )}
+
       {importStatus && (
-        <div className={`mb-4 px-4 py-3 rounded-lg text-sm ${importStatus.type === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+        <div
+          className={`mb-4 rounded-xl px-4 py-3 text-sm ${
+            importStatus.type === 'success'
+              ? 'border border-brand-soft bg-brand-tint text-brand-strong'
+              : 'border border-danger/20 bg-danger/5 text-danger'
+          }`}
+        >
           {importStatus.message}
-          <button onClick={() => setImportStatus(null)} className="ml-3 underline text-xs cursor-pointer">dismiss</button>
+          <button onClick={() => setImportStatus(null)} className="ml-3 cursor-pointer text-xs underline">dismiss</button>
         </div>
       )}
 
-      <input
-        type="text"
-        placeholder="Search foods..."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="w-full mb-4 border border-gray-300 rounded-lg px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
-      />
+      <div className="relative mb-4">
+        <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
+        <input
+          type="text"
+          placeholder="Search foods…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full rounded-xl border border-border bg-surface py-2 pl-9 pr-4 text-sm text-ink outline-none transition-colors focus:border-brand focus:ring-2 focus:ring-brand/30"
+        />
+      </div>
 
       {loading ? (
-        <p className="text-gray-500 text-sm">Loading...</p>
+        <p className="text-sm text-muted">Loading…</p>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <Card className="overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
+            <thead className="border-b border-border bg-surface-sunken">
               <tr>
-                <th className="text-left px-4 py-3 font-semibold text-gray-600">Food Name</th>
-                <th className="text-left px-4 py-3 font-semibold text-gray-600">Serving Size</th>
-                <th className="text-right px-4 py-3 font-semibold text-gray-600">Calories</th>
-                <th className="text-right px-4 py-3 font-semibold text-gray-600">Protein</th>
-                <th className="text-right px-4 py-3 font-semibold text-gray-600">Carbs</th>
-                <th className="text-right px-4 py-3 font-semibold text-gray-600">Fat</th>
-                <th className="text-right px-4 py-3 font-semibold text-gray-600">Actions</th>
+                <th className="px-4 py-3 text-left font-semibold text-muted">Food Name</th>
+                <th className="px-4 py-3 text-left font-semibold text-muted">Serving Size</th>
+                <th className="px-4 py-3 text-right font-semibold text-muted">Calories</th>
+                <th className="px-4 py-3 text-right font-semibold text-protein">Protein</th>
+                <th className="px-4 py-3 text-right font-semibold text-carbs">Carbs</th>
+                <th className="px-4 py-3 text-right font-semibold text-fat">Fat</th>
+                <th className="px-4 py-3 text-right font-semibold text-muted">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-border">
               {showAddForm && (
                 <FoodFormRow
                   value={addForm}
@@ -267,9 +245,9 @@ export default function FoodDatabase() {
               )}
               {filtered.length === 0 && !showAddForm ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-16 text-gray-400">
-                    <p className="text-lg font-medium mb-1">No foods found</p>
-                    <p className="text-sm">Foods are added automatically when you save a meal plan, or manually via "+ Add Food".</p>
+                  <td colSpan={7} className="py-16 text-center text-faint">
+                    <p className="mb-1 text-lg font-medium">No foods found</p>
+                    <p className="text-sm">Foods are added automatically when you save a meal plan, or manually via “+ Add Food”.</p>
                   </td>
                 </tr>
               ) : (
@@ -285,28 +263,19 @@ export default function FoodDatabase() {
                       saving={editSaving}
                     />
                   ) : (
-                    <tr key={f.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-4 py-3 font-medium text-gray-800">{f.food_name}</td>
-                      <td className="px-4 py-3 text-gray-500">{f.serving_size || '—'}</td>
-                      <td className="px-4 py-3 text-right text-gray-700">{f.base_calories} kcal</td>
-                      <td className="px-4 py-3 text-right text-gray-700">{f.base_protein}g</td>
-                      <td className="px-4 py-3 text-right text-gray-700">{f.base_carbs}g</td>
-                      <td className="px-4 py-3 text-right text-gray-700">{f.base_fat}g</td>
+                    <tr key={f.id} className="transition-colors hover:bg-surface-sunken/60">
+                      <td className="px-4 py-3 font-medium text-ink">{f.food_name}</td>
+                      <td className="px-4 py-3 text-muted">{f.serving_size || '—'}</td>
+                      <td className="px-4 py-3 text-right text-muted">{f.base_calories} kcal</td>
+                      <td className="px-4 py-3 text-right text-muted">{f.base_protein}g</td>
+                      <td className="px-4 py-3 text-right text-muted">{f.base_carbs}g</td>
+                      <td className="px-4 py-3 text-right text-muted">{f.base_fat}g</td>
                       <td className="px-4 py-3 text-right">
-                        <div className="flex gap-1 justify-end">
-                          <button
-                            onClick={() => startEdit(f)}
-                            className="px-2 py-1 border border-gray-300 rounded text-xs text-gray-600 hover:bg-gray-100 cursor-pointer"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => handleDelete(f.id)}
-                            disabled={deletingId === f.id}
-                            className="px-2 py-1 border border-red-200 rounded text-xs text-red-600 hover:bg-red-50 disabled:opacity-50 cursor-pointer"
-                          >
+                        <div className="flex justify-end gap-1">
+                          <Button size="sm" variant="ghost" onClick={() => startEdit(f)}>Edit</Button>
+                          <Button size="sm" variant="danger" onClick={() => handleDelete(f.id)} disabled={deletingId === f.id}>
                             {deletingId === f.id ? '…' : 'Delete'}
-                          </button>
+                          </Button>
                         </div>
                       </td>
                     </tr>
@@ -315,7 +284,7 @@ export default function FoodDatabase() {
               )}
             </tbody>
           </table>
-        </div>
+        </Card>
       )}
     </div>
   );

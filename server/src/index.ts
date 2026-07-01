@@ -8,9 +8,10 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '6mb' })); // headroom for resized progress photos (base64)
 
-app.use('/api', planRoutes);
+app.use('/api/v1', planRoutes);
+app.use('/api', planRoutes); // back-compat alias (un-versioned clients)
 
 // Serve static files in production
 const clientDist = path.join(__dirname, '../../client/dist');

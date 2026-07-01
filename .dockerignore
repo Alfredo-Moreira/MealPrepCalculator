@@ -11,3 +11,5 @@ data.db-wal
 README.md
 CLAUDE.md
 *.sh
+.DS_Store
+.agents

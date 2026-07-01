@@ -9,6 +9,8 @@ const idTransform = (_: unknown, ret: Record<string, unknown>) => {
   return ret;
 };
 
+const PLAN_STATUSES = ['planned', 'active', 'completed', 'archived'] as const;
+
 const MealItemSchema = new Schema(
   {
     meal_label: String,
@@ -41,19 +43,73 @@ const MealPlanSchema = new Schema({
 });
 MealPlanSchema.set('toJSON', { transform: idTransform });
 
-const ProfileSchema = new Schema({
-  name: String,
-  age: Number,
-  gender: String,
-  weight_kg: Number,
-  height_cm: Number,
-  activity_level: String,
-  goal: { type: String, default: 'maintain' },
-  tdee: Number,
-  calorie_deficit: { type: Number, default: 0 },
-  created_at: { type: Date, default: Date.now },
+// A "User" — a person who owns meal plans. Organizational only, NOT an auth boundary.
+const UserSchema = new Schema(
+  {
+    name: { type: String, required: true, trim: true },
+    notes: { type: String, default: '' },
+    // Optional soft PIN gate (personal app — not a hard security boundary).
+    has_pin: { type: Boolean, default: false },
+    pin_hash: { type: String, select: false },
+    pin_salt: { type: String, select: false },
+  },
+  { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }
+);
+UserSchema.set('toJSON', {
+  transform: (doc, ret: Record<string, unknown>) => {
+    delete ret.pin_hash;
+    delete ret.pin_salt;
+    return idTransform(doc, ret);
+  },
 });
+
+// A "Profile" is what the user calls a *meal plan*: biometrics + goal + dates + sequence,
+// with child MealPlan day-plans (workout / non_workout).
+const ProfileSchema = new Schema(
+  {
+    user_id: { type: Schema.Types.ObjectId, ref: 'User', index: true },
+    name: String,
+    age: Number,
+    gender: String,
+    weight_kg: Number,
+    height_cm: Number,
+    activity_level: String,
+    goal: { type: String, default: 'maintain' },
+    tdee: Number,
+    calorie_deficit: { type: Number, default: 0 },
+    start_date: { type: Date },
+    end_date: { type: Date },
+    status: { type: String, enum: PLAN_STATUSES, default: 'active' },
+    sequence: { type: Number, default: 1 },
+    previous_plan_id: { type: Schema.Types.ObjectId, ref: 'Profile' },
+    created_at: { type: Date, default: Date.now },
+  },
+  { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }
+);
 ProfileSchema.set('toJSON', { transform: idTransform });
+
+// A check-in: end-of-plan (or interim) progress entry against a Profile.
+const CheckInSchema = new Schema(
+  {
+    user_id: { type: Schema.Types.ObjectId, ref: 'User', index: true },
+    profile_id: { type: Schema.Types.ObjectId, ref: 'Profile', required: true, index: true },
+    date: { type: Date, required: true, default: Date.now },
+    weight_kg: { type: Number },
+    energy: { type: Number, min: 1, max: 5 },
+    adherence: { type: Number, min: 1, max: 5 },
+    hunger: { type: Number, min: 1, max: 5 },
+    progress_rating: { type: Number, min: 1, max: 5 },
+    notes: { type: String, default: '' },
+    photo: { type: String }, // legacy single progress photo (kept for back-compat)
+    photos: {
+      front: { type: String },
+      back: { type: String },
+      side: { type: String },
+    },
+  },
+  { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }
+);
+CheckInSchema.set('toJSON', { transform: idTransform });
 
 const FoodSchema = new Schema({
   food_name: { type: String, required: true },
@@ -70,9 +126,13 @@ FoodSchema.index(
 );
 FoodSchema.set('toJSON', { transform: idTransform });
 
+export const User = model('User', UserSchema);
 export const Profile = model('Profile', ProfileSchema);
 export const MealPlan = model('MealPlan', MealPlanSchema);
+export const CheckIn = model('CheckIn', CheckInSchema);
 export const Food = model('Food', FoodSchema);
+
+export { PLAN_STATUSES };
 
 export async function connectDb() {
   await mongoose.connect(MONGODB_URI);
